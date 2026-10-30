@@ -1,0 +1,4 @@
+# build output
+build/*.zip
+build/.build_staging/
+*.zip

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<modDesc descVersion="94">
+    <author>ubuntu811</author>
+    <version>0.1.0.0</version>
+    <title>
+        <en>RandomFixes</en>
+    </title>
+    <description>
+        <en><![CDATA[
+A collection of small base game fixes and conveniences that are too small for a mod of their own.
+
+* Vehicles list (menu, Vehicles): the licence plate column shows what each machine is (Tractor, Roller, Trailer ...) instead, taken from its
+  shop category, so nobody has to know every brand name. Click the header to sort by it.
+* Steering assist (field lanes): with two implements on one tractor (a mower and a windrower ...) the lanes are planned for the NARROWEST of
+  them, not the widest, lowered or not. Every player needs this mod for it to apply.
+* Quitting a savegame with an inline bale (a string of bales) in it no longer fails with "invalid key to next" and hangs.
+* AI helper with a harvester header that has a cutter and a fruit preparer: crops the cutter takes but the preparer does not list (peas next to beets on a
+  multi-crop header) are offered to the AI helper too, instead of "field not ready for this work".
+]]></en>
+        <de><![CDATA[
+Eine Sammlung kleiner Korrekturen und Verbesserungen am Basisspiel, die fuer einen eigenen Mod zu klein sind.
+
+* Fahrzeugliste (Menue, Fahrzeuge): eine Spalte "Typ" zeigt, was jede Maschine ist (Traktor, Walze, Anhaenger ...), aus der Shop-Kategorie.
+* Lenkassistent (Feldspuren): mit zwei Geraeten an einem Traktor werden die Spuren fuer das SCHMALSTE geplant, nicht das breiteste.
+* Beenden eines Spielstands mit Ballenkette bleibt nicht mehr haengen.
+* KI-Helfer mit Erntevorsatz aus Schneidwerk und Fruchtvorbereiter: Fruechte, die das Schneidwerk kann, der Vorbereiter aber nicht auflistet, kennt der Helfer jetzt auch.
+]]></de>
+    </description>
+    <iconFilename>icon.dds</iconFilename>
+    <multiplayer supported="true" />
+
+    <extraSourceFiles>
+        <sourceFile filename="scripts/VehicleTypeColumn.lua" />
+        <sourceFile filename="scripts/NarrowLanes.lua" />
+        <sourceFile filename="scripts/InlineBaleShutdown.lua" />
+        <sourceFile filename="scripts/PreparerCrops.lua" />
+    </extraSourceFiles>
+
+    <l10n>
+        <text name="rf_columnType">
+            <en>Type</en>
+            <de>Typ</de>
+        </text>
+        <text name="rf_typeUnknown">
+            <en>-</en>
+            <de>-</de>
+        </text>
+    </l10n>
+</modDesc>
