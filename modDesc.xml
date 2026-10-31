@@ -16,6 +16,8 @@ A collection of small base game fixes and conveniences that are too small for a 
 * Quitting a savegame with an inline bale (a string of bales) in it no longer fails with "invalid key to next" and hangs.
 * AI helper with a harvester header that has a cutter and a fruit preparer: crops the cutter takes but the preparer does not list (peas next to beets on a
   multi-crop header) are offered to the AI helper too, instead of "field not ready for this work".
+* Minimap: a meadow you have just plowed (a new field) shows up on the minimap's field picture sooner: the picture is asked to refresh 2 s after its last
+  refresh while you plow or cultivate, instead of waiting out the game's full timer. The time a refresh takes is logged once a minute.
 ]]></en>
         <de><![CDATA[
 Eine Sammlung kleiner Korrekturen und Verbesserungen am Basisspiel, die fuer einen eigenen Mod zu klein sind.
@@ -24,6 +26,8 @@ Eine Sammlung kleiner Korrekturen und Verbesserungen am Basisspiel, die fuer ein
 * Lenkassistent (Feldspuren): mit zwei Geraeten an einem Traktor werden die Spuren fuer das SCHMALSTE geplant, nicht das breiteste.
 * Beenden eines Spielstands mit Ballenkette bleibt nicht mehr haengen.
 * KI-Helfer mit Erntevorsatz aus Schneidwerk und Fruchtvorbereiter: Fruechte, die das Schneidwerk kann, der Vorbereiter aber nicht auflistet, kennt der Helfer jetzt auch.
+* Minikarte: eine frisch umgepfluegte Wiese (ein neues Feld) erscheint frueher im Feldbild der Minikarte.
+* KI-Helfer: der umpfluegte Umriss eines neuen Feldes (ein geschlossener Ring) macht die ganze Flaeche zum Feld, nicht nur den Ring.
 ]]></de>
     </description>
     <iconFilename>icon.dds</iconFilename>
@@ -34,6 +38,8 @@ Eine Sammlung kleiner Korrekturen und Verbesserungen am Basisspiel, die fuer ein
         <sourceFile filename="scripts/NarrowLanes.lua" />
         <sourceFile filename="scripts/InlineBaleShutdown.lua" />
         <sourceFile filename="scripts/PreparerCrops.lua" />
+        <sourceFile filename="scripts/FieldsOverlay.lua" />
+        <sourceFile filename="scripts/OutlineFields.lua" />
     </extraSourceFiles>
 
     <l10n>

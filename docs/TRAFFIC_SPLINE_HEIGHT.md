@@ -17,6 +17,13 @@ After terraforming a road, ambient traffic cars keep driving at the old height: 
 * Engine functions: `getSplineCV` / `getSplineEP` return **world** coordinates, `setSplineCV` / `setSplineEP` take the spline's **local** space (an easy trap),
   `getTimeAtSplineCV`, `getSplinePosition(spline, t)`, `createSplineFromEditPoints(parent, coords, linear, closed)`.
 
+## Observation from the game (2026-10-30, a recording made with the road follower)
+
+Cars that float above the ground **stop floating once they are close enough to the player**. So the engine does not simply keep every traffic car on the spline's height: far cars follow the
+spline (and show its stale height after terraforming), near cars are settled on the ground (physics or a ground raycast that only runs near the player). That makes the floating a
+**far-distance effect only**: what it implies for a fix is that snapping the splines (TrafficLab `tlSnap`) would only change how distant cars look, and cars near the player already
+behave. Not yet measured: the distance at which they come down (TrafficLab could log it: the height difference of the nearest traffic cars against the distance to the player).
+
 ## Hypothesis
 
 The cars read their height from the spline's control vertices, baked when the traffic system is created; terraforming never touches them.
