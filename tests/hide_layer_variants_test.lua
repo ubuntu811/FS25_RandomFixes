@@ -4,7 +4,11 @@ local realPrint = print
 local function check(name, ok) if ok then passed = passed + 1 else failed = failed + 1; realPrint("  FAIL " .. name) end end
 local log = {}
 print = function(text) log[#log + 1] = text end
-Utils = { prependedFunction = function(old, new) return function(...) new(...); return old(...) end end }
+-- (like the engine's: a prepended or appended function hands back nothing; an overwritten one gets the original as its second argument and returns what it likes)
+Utils = {
+    prependedFunction = function(old, new) return function(...) new(...); old(...) end end,
+    overwrittenFunction = function(old, new) return function(self, ...) return new(self, old, ...) end end,
+}
 
 local layers = { "DIRT", "DIRT_ROAD", "STONY_DIRT", "COBBLESTONE03", "COBBLESTONE03_CRACKED1", "COBBLESTONE03_CRACKED3", "COBBLESTONE03_MISSING2", "COBBLESTONE03_WORN", "COBBLESTONE03_DAMAGED", "GHOST_CRACKED", "cobblestone03", "cobblestone03_cracked1" }
 g_terrainNode = 1

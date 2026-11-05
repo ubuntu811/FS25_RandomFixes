@@ -69,12 +69,14 @@ end
 
 if ConstructionScreen ~= nil and not HideLayerVariants.hooked then
     HideLayerVariants.hooked = true
-    ConstructionScreen.buildTerrainPaintBrushes = Utils.prependedFunction(ConstructionScreen.buildTerrainPaintBrushes, function()
+    -- overwritten, not prepended: the screen reads the result (numItems = self:buildTerrainPaintBrushes(numItems)), and a prepended function returns nothing (the screen broke: "arithmetic on nil")
+    ConstructionScreen.buildTerrainPaintBrushes = Utils.overwrittenFunction(ConstructionScreen.buildTerrainPaintBrushes, function(self, superFunc, ...)
         local ok, removed = pcall(function() return HideLayerVariants.prune(g_groundTypeManager, terrainLayerNames()) end)
         if not ok then
             say("painting menu: the damage variants could not be hidden (%s)", tostring(removed))
         elseif removed > 0 then
             say("painting menu: %d damage variant(s) of ground textures left out", removed)
         end
+        return superFunc(self, ...)
     end)
 end
