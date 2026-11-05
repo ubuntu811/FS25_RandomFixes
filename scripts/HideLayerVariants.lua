@@ -7,6 +7,7 @@
     mods loaded: the filter runs at the last moment.
 
     A variant is a layer named <another layer of the map>_<something with a damage word> (crack, missing, worn, damage, broken, chip, pothole, hole), so DIRT_ROAD or STONY_DIRT stay.
+    One stays: <NAME>_DAMAGED, the mix of the intact layer and all its variants (tools/add_layers.py): paint a texture, then brush this one in places for some damage without choosing a variant.
 ]]
 HideLayerVariants = {}
 HideLayerVariants.WORDS = { "crack", "missing", "worn", "damage", "broken", "chip", "pothole", "hole" }
@@ -36,7 +37,11 @@ function HideLayerVariants.isVariant(name, known)
     end
 end
 
--- Removes the variants from the manager's mappings (typeName -> { layerName }). Returns how many.
+-- Removes the variants (not the _DAMAGED mix) from the manager's mappings (typeName -> { layerName }). Returns how many.
+function HideLayerVariants.isTheMix(name)
+    return string.upper(name):sub(-8) == "_DAMAGED"
+end
+
 function HideLayerVariants.prune(manager, layerNames)
     local known = {}
     for _, name in ipairs(layerNames) do
@@ -44,7 +49,7 @@ function HideLayerVariants.prune(manager, layerNames)
     end
     local remove = {}
     for typeName, mapping in pairs(manager.groundTypeMappings or {}) do
-        if mapping.layerName ~= nil and HideLayerVariants.isVariant(mapping.layerName, known) then
+        if mapping.layerName ~= nil and not HideLayerVariants.isTheMix(mapping.layerName) and HideLayerVariants.isVariant(mapping.layerName, known) then
             remove[#remove + 1] = typeName
         end
     end

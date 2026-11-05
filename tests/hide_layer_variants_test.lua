@@ -25,9 +25,10 @@ check("real layers with an underscore, and a name whose base layer does not exis
 
 local result = ConstructionScreen:buildTerrainPaintBrushes(41)
 check("the screen builds its brushes as before (the original runs, its result is kept)", result == 42)
-check("the variants are gone from the list the screen builds from", built["COBBLESTONE03_CRACKED1"] == nil and built["COBBLESTONE03_CRACKED3"] == nil and built["COBBLESTONE03_MISSING2"] == nil and built["COBBLESTONE03_WORN"] == nil and built["COBBLESTONE03_DAMAGED"] == nil and built["cobblestone03_cracked1"] == nil)
+check("the variants are gone from the list the screen builds from", built["COBBLESTONE03_CRACKED1"] == nil and built["COBBLESTONE03_CRACKED3"] == nil and built["COBBLESTONE03_MISSING2"] == nil and built["COBBLESTONE03_WORN"] == nil and built["cobblestone03_cracked1"] == nil)
 check("... and everything else stays (the base layers, the road and stony dirt, the mapped type)", built["DIRT"] and built["DIRT_ROAD"] and built["STONY_DIRT"] and built["COBBLESTONE03"] and built["cobblestone03"] and built["GHOST_CRACKED"] and built.tiles08)
-check("one line says how many were left out (6: five variants and the lower-case base one)", #log == 1 and log[1]:find("6 damage variant", 1, true) ~= nil)
+check("... and the _DAMAGED mix stays: the one entry per texture for painting damage in places", built["COBBLESTONE03_DAMAGED"] == true)
+check("one line says how many were left out (5: cracked1, cracked3, missing2, worn and the lower-case cracked1)", #log == 1 and log[1]:find("5 damage variant", 1, true) ~= nil)
 
 -- a second build: nothing left to remove, no line
 log = {}

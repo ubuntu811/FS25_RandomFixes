@@ -43,7 +43,10 @@ set's "matching details" lays them), so just before the screen builds its paint 
 damage word> (crack, missing, worn, damage, broken, chip, pothole, hole). DIRT_ROAD or STONY_DIRT stay. It does not matter which mod added them or which loaded first; the filter runs at
 the last moment, and the log says how many it left out.
 
-Test: `lua5.1 tests/hide_layer_variants_test.lua` (a fake ground type manager, 8 checks).
+One entry per texture stays: **`NAME_DAMAGED`** ("Cobblestone03 Damaged"), the mix of the intact layer and all its variants. Paint a surface with the texture, then brush the damaged one in places: some
+cracks and missing stones, without choosing a variant. (The mix is made by `add_layers.py` in Immersive Weathering's tools; how the engine blends its parts, patchy by noise or not, I have not seen in the game.)
+
+Test: `lua5.1 tests/hide_layer_variants_test.lua` (a fake ground type manager, 9 checks).
 
 ## Steering assist: lanes for the narrowest implement
 
