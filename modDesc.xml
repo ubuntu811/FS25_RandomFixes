@@ -37,6 +37,7 @@ Eine Sammlung kleiner Korrekturen und Verbesserungen am Basisspiel, die fuer ein
         <sourceFile filename="scripts/VehicleTypeColumn.lua" />
         <sourceFile filename="scripts/SelectOwnVehicle.lua" />
         <sourceFile filename="scripts/SmartShopSearch.lua" />
+        <sourceFile filename="scripts/HideLayerVariants.lua" />
         <sourceFile filename="scripts/NarrowLanes.lua" />
         <sourceFile filename="scripts/InlineBaleShutdown.lua" />
         <sourceFile filename="scripts/PreparerCrops.lua" />

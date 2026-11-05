@@ -35,6 +35,16 @@ alone and the log says why.
 
 Test: `lua5.1 tests/smart_shop_search_test.lua` (a fake store, 16 checks).
 
+## Construction screen: the Painting menu without the damage variants
+
+The mod "All The Ground Textures" puts every ALL-CAPS terrain layer into the Painting menu of the construction screen. The damage variants made for Immersive Weathering
+(COBBLESTONE03_CRACKED1, _MISSING2, _WORN ...) are ALL-CAPS layers too, five to seven more tiles per texture, which would bury the real ones. They are not meant to be painted by hand (a
+set's "matching details" lays them), so just before the screen builds its paint brushes they are taken out of the ground type list: any layer named <another layer of the map>_<something with a
+damage word> (crack, missing, worn, damage, broken, chip, pothole, hole). DIRT_ROAD or STONY_DIRT stay. It does not matter which mod added them or which loaded first; the filter runs at
+the last moment, and the log says how many it left out.
+
+Test: `lua5.1 tests/hide_layer_variants_test.lua` (a fake ground type manager, 8 checks).
+
 ## Steering assist: lanes for the narrowest implement
 
 With two implements on one tractor (a mower and a windrower, a cultivator and a seeder) the game's steering assist plans its field lanes for the WIDEST of them: its lane
