@@ -23,6 +23,18 @@ or in something the list does not show, it stays as it was.
 
 Test: `lua5.1 tests/select_own_vehicle_test.lua` (a fake frame, 5 checks).
 
+## Shop search: it also knows what a machine is
+
+Typing "cotton" into the shop's search found three things with cotton in their name and none of the cotton harvesters, though the shop files them under **Cotton Harvesters** (the
+game's search index holds only title, brand, author and DLC title, not the category). The search still runs as before; the items whose **category titles, brand and name together contain every
+word typed** (any order, any case: "case cotton", "forage", "tractors") are added after the game's own results, nobody twice, and only items the shop shows (vehicles and hand tools, in the
+store, unlocked: the game's own index conditions).
+
+Put on the store manager the first time the shop's search is used (`StoreManager:search` is one line that hands over to the engine's index). If anything does not fit the game's search runs
+alone and the log says why.
+
+Test: `lua5.1 tests/smart_shop_search_test.lua` (a fake store, 16 checks).
+
 ## Steering assist: lanes for the narrowest implement
 
 With two implements on one tractor (a mower and a windrower, a cultivator and a seeder) the game's steering assist plans its field lanes for the WIDEST of them: its lane
