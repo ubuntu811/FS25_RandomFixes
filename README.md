@@ -16,6 +16,13 @@ problem.)
 
 Test: `lua5.1 tests/vehicle_type_column_test.lua` (a fake GUI, 27 checks).
 
+## Vehicles list: it opens on the machine you are sitting in
+
+The same list used to open on the first row of the alphabet (an AGCO mower, whatever you were driving). It now opens with **your own vehicle selected and scrolled to**. On foot,
+or in something the list does not show, it stays as it was.
+
+Test: `lua5.1 tests/select_own_vehicle_test.lua` (a fake frame, 5 checks).
+
 ## Steering assist: lanes for the narrowest implement
 
 With two implements on one tractor (a mower and a windrower, a cultivator and a seeder) the game's steering assist plans its field lanes for the WIDEST of them: its lane
