@@ -287,6 +287,16 @@ check("shiftFor: beyond MAX_SHIFT_M it says so and does not move", select(2, Res
 ReseatDecals.LIFT_M = 0.015
 check("a moved puddle gets the lift on top", math.abs(ReseatDecals.shiftFor(9.6, 10, 0.02, 0.06) - (0.42 + 0.015)) < 1e-9)
 check("a puddle within the tolerance is not lifted either", ReseatDecals.shiftFor(10.02, 10, 0.02, 0.06) == nil)
+-- a deck that was moved takes the pieces on it along (the ray's hit height is their level): 30 cm down for the low bridge, for the high one (9 m up, past the cap) and for the post on the deck
+structures[1].y = structures[1].y - 0.3
+structures[#structures + 1] = { minX = 89, maxX = 91, y = ground(90, 0) + 9 - 0.02 - 0.3, node = deckNode }
+structures[3].y = structures[3].y - 0.3
+local offset = ReseatDecals.state.offsets.puddles
+hooks["randomfixes.reseat"](nil)
+run(10)
+check("the deck 30 cm lower: the puddle on it follows", math.abs(nodes[bridge4].y - (structures[1].y + offset + ReseatDecals.liftOf("puddles"))) < 1e-6)
+check("the same for the high bridge, past the cap", math.abs(nodes[bridge].y - (ground(90, 0) + 9 - 0.02 - 0.3 + offset + ReseatDecals.liftOf("puddles"))) < 1e-6)
+check("and for the post on its deck", math.abs(nodes[onDeck].y - (structures[3].y + (ReseatDecals.state.offsets.posts or 0))) < 1e-6)
 print = realPrint
 realPrint(string.format("reseat_decals_test: %d/%d passed", passed, passed + failed))
 os.exit(failed == 0 and 0 or 1)
