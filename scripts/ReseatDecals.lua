@@ -7,12 +7,12 @@
 
     How: once, a little after the mission starts, the scene is walked in small slices (a time budget per frame) and every shape whose name holds PATTERNS is remembered. Each one's height above the ground
     (the world bounding sphere's centre against the terrain at that spot) is measured; the MEDIAN of those is the normal offset of a puddle over its ground (nearly all of them are untouched, so the median is
-    the untouched value). After that a pass over all of them runs every SWEEP_S seconds, again in slices: a puddle whose height over the ground is off the offset by more than TOLERANCE is moved, as a whole,
+    the untouched value). After that a pass over all of them runs, again in slices, a moment after every terrain edit (the queue's queueJob and TerrainDeformation.apply are wrapped to notice one; nothing runs between edits): a puddle whose height over the ground is off the offset by more than TOLERANCE is moved, as a whole,
     up or down by the difference. A bowl cannot be followed (a mesh does not bend), a lowered or raised stretch can.
 
     The log says how many were found, the offset, how far off the pieces are (percentiles) and how many were moved ("[RandomFixes] puddles: ...").
 ]]
-ReseatDecals = { PATTERNS = { "puddle" }, TOLERANCE = 0.06, BUDGET_MS = 0.25, START_DELAY_S = 8, SWEEP_S = 5, MAX_NODES_PER_SLICE = 4000 }
+ReseatDecals = { PATTERNS = { "puddle" }, TOLERANCE = 0.06, BUDGET_MS = 0.25, START_DELAY_S = 8, MAX_NODES_PER_SLICE = 4000 }
 
 local function say(format, ...)
     print(string.format("[RandomFixes] " .. format, ...))
@@ -136,15 +136,53 @@ local function sweep(state, budgetMs)
     return true
 end
 
+-- A terrain edit goes through g_terrainDeformationQueue:queueJob (construction, levelling placeables) or deformation:apply (TerraFarm): both are wrapped to note that something changed; nothing runs
+-- between edits. SETTLE_S after the last edit a pass runs (the job is applied over the next frames), and one more LATE_S later for the slow ones. If neither hook could be installed, the pass runs every FALLBACK_S.
+ReseatDecals.SETTLE_S, ReseatDecals.LATE_S, ReseatDecals.FALLBACK_S = 2, 6, 30
+
+function ReseatDecals.markDirty(label)
+    local state = ReseatDecals.state
+    if state == nil then
+        return
+    end
+    state.due = state.clock + ReseatDecals.SETTLE_S
+    state.second = true
+    state.edits = (state.edits or 0) + 1
+    if state.edits <= 3 then
+        say("puddles: terrain edit seen (%s)", label)
+    end
+end
+
+local function wrap(owner, key, label)
+    if type(owner) ~= "table" or type(owner[key]) ~= "function" then
+        return false
+    end
+    local original = owner[key]
+    owner[key] = function(...)
+        ReseatDecals.markDirty(label)
+        return original(...)
+    end
+    return true
+end
+
+function ReseatDecals.installHooks()
+    local ok1, r1 = pcall(wrap, g_terrainDeformationQueue, "queueJob", "queueJob")
+    local ok2, r2 = pcall(wrap, TerrainDeformation, "apply", "apply")
+    ReseatDecals.hookCount = ((ok1 and r1) and 1 or 0) + ((ok2 and r2) and 1 or 0)
+    say("puddles: terrain edit hooks: queueJob %s, apply %s", (ok1 and r1) and "yes" or "no", (ok2 and r2) and "yes" or "no")
+end
+
 function ReseatDecals.update(dt)
     if g_currentMission == nil or g_terrainNode == nil or g_client == nil then
         return
     end
     local state = ReseatDecals.state
     if state == nil then
-        state = { phase = "wait", waited = 0, stack = {}, pieces = {}, devs = {}, cursor = 1, moved = 0, movedTotal = 0, idle = 0 }
+        state = { phase = "wait", waited = 0, clock = 0, stack = {}, pieces = {}, devs = {}, cursor = 1, moved = 0, movedTotal = 0 }
         ReseatDecals.state = state
+        ReseatDecals.installHooks()
     end
+    state.clock = state.clock + dt / 1000
     local budget = ReseatDecals.BUDGET_MS
     if state.phase == "wait" then
         state.waited = state.waited + dt / 1000
@@ -186,12 +224,19 @@ function ReseatDecals.update(dt)
             end
             state.moved = 0
             state.cursor = 1
-            state.phase = "rest"
-            state.idle = 0
+            state.phase = "idle"
+            if state.second then                       -- one more pass a little later for an edit that was still being applied
+                state.second = false
+                state.due = state.clock + ReseatDecals.LATE_S
+            elseif ReseatDecals.hookCount == 0 then
+                state.due = state.clock + ReseatDecals.FALLBACK_S
+            else
+                state.due = nil
+            end
         end
-    elseif state.phase == "rest" then
-        state.idle = state.idle + dt / 1000
-        if state.idle >= ReseatDecals.SWEEP_S then
+    elseif state.phase == "idle" then
+        if state.due ~= nil and state.clock >= state.due then
+            state.due = nil
             state.phase = "sweep"
         end
     end
