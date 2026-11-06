@@ -15,7 +15,7 @@
 
     The log says how many were found, the offset, how far off the pieces are (percentiles) and how many were moved ("[RandomFixes] puddles: ...").
 ]]
-ReseatDecals = { PATTERNS = { "puddle" }, POST_NAMES = {}, TOLERANCE = 0.06, BUDGET_REQUEST_MS = 8, BUDGET_RESTORE_MS = 1.5, START_DELAY_S = 3, MAX_NODES_PER_SLICE = 4000, FILE = "reseatDecals.xml", MIN_SAVED_M = 0.01, RING_SAMPLES = 8, RING_PART = 0.9, MAX_RING_M = 3, MAX_SHIFT_M = 6, LIFT_M = 0.015, RAY_UP_M = 0.3, RAY_LEN_M = 0.7, POST_SIDE_M = 0.3 }
+ReseatDecals = { PATTERNS = { "puddle" }, POST_NAMES = { "leitpfosten_r", "leitpfosten_l" }, POST_MAX_SHARE = 0.10, POST_MAX_MIN = 8, TOLERANCE = 0.06, BUDGET_REQUEST_MS = 8, BUDGET_RESTORE_MS = 1.5, START_DELAY_S = 3, MAX_NODES_PER_SLICE = 4000, FILE = "reseatDecals.xml", MIN_SAVED_M = 0.01, RING_SAMPLES = 8, RING_PART = 0.9, MAX_RING_M = 3, MAX_SHIFT_M = 6, LIFT_M = 0.015, RAY_UP_M = 0.3, RAY_LEN_M = 0.7, POST_SIDE_M = 0.3 }
 
 local function say(format, ...)
     print(string.format("[RandomFixes] " .. format, ...))
@@ -31,15 +31,21 @@ function ReseatDecals.matches(name)
     return false
 end
 
--- What gets reseated: "puddles" are shapes whose name holds PATTERNS (their level is the lowest point of their border, they get the LIFT_M on top); "posts" are groups named exactly as POST_NAMES, whose origin is
--- their foot (their level is the ground at that spot). POST_NAMES is EMPTY: CreativeHorizon's guide posts ("Leitpfosten") are nested (a container at the world origin holds the pair groups, so the container was
--- measured 100 m under the ground and moved: every guide post on the map vanished) and are dynamic bodies with breakable joints, which a script must not move. The class stays for things that are neither. Each class has its own normal offset over its level (the median of its members).
+-- What gets reseated: "puddles" are shapes whose name holds PATTERNS (their level is the lowest point of their border, they get the LIFT_M on top). "posts" are the roadside guide posts: the nodes named exactly
+-- as POST_NAMES ("leitpfosten_r" / "leitpfosten_l"), each with its own height; their level is the ground at that spot. Both are MOVED as a whole, up or down. A post is a dynamic body on a breakable joint, and
+-- moving its node moves its collision body with it (measured with reseatPostTest: node and "coli" +0.30 m together, and it stayed there). Safeguards, after a first version moved the "Leitpfosten" CONTAINER
+-- groups (one sits at the world origin) and took every post of the map with it: only nodes that have a "joint" child are taken, never the containers; a post with a structure under it is left alone or follows
+-- it; and a pass that would move more than POST_MAX_SHARE of all the posts (at least POST_MAX_MIN) is refused: that is a mistake, not an edit.
 ReseatDecals.CLASS_LIST = { "puddles", "posts" }
 function ReseatDecals.classOf(node, name)
     local lower = string.lower(name or "")
     for _, post in ipairs(ReseatDecals.POST_NAMES) do
         if lower == post then
-            return "posts"
+            local joint = getChild(node, "joint")
+            if joint ~= nil and joint ~= 0 then
+                return "posts"
+            end
+            return nil
         end
     end
     if ReseatDecals.matches(name) and getHasClassId(node, ClassIds.SHAPE) then
@@ -380,6 +386,10 @@ local function sweep(state, budgetMs)
                 end
             end
         end
+        if delta ~= nil and piece.class == "posts" then
+            state.postMoves[#state.postMoves + 1] = { piece = piece, delta = delta }
+            delta = nil
+        end
         if delta ~= nil then
             local x, wy, z = getWorldTranslation(piece.node)
             setWorldTranslation(piece.node, x, wy + delta, z)
@@ -398,7 +408,7 @@ end
 -- On demand: nothing runs in the background. At the start of a mission the saved moves are put back (only when the savegame has any); a pass (find, measure, move the ones that are off) runs when asked for:
 -- the button of the "Map fixes" tab in WAILA's hub (ReseatDecals.requestPass), or the console command reseatDecals.
 local function newState()
-    return { phase = "wait", waited = 0, stack = {}, pieces = {}, devs = {}, cursor = 1, moved = 0, movedTotal = 0, saved = ReseatDecals.readFile(), indexed = false, purpose = nil, wantPass = false }
+    return { phase = "wait", waited = 0, stack = {}, pieces = {}, devs = {}, cursor = 1, moved = 0, movedTotal = 0, postMoves = {}, saved = ReseatDecals.readFile(), indexed = false, purpose = nil, wantPass = false }
 end
 
 -- the walk starts at the map file's own nodes (the terrain's parent: the map's top-level groups hang there), not at the root of the whole mission scene with every placeable and vehicle in it
@@ -464,8 +474,36 @@ local function refreshHub()
     end
 end
 
+-- the guide posts that are to be moved are applied together, unless that is more than a mistake can explain
+local function applyPostMoves(state)
+    local moves = state.postMoves
+    state.postMoves = {}
+    if #moves == 0 then
+        return
+    end
+    local total = 0
+    for _, piece in ipairs(state.pieces) do
+        if piece.class == "posts" then
+            total = total + 1
+        end
+    end
+    if #moves > math.max(ReseatDecals.POST_MAX_MIN, ReseatDecals.POST_MAX_SHARE * total) then
+        say("guide posts: %d of %d would be moved: refused, that is far more than an edit does (nothing was moved)", #moves, total)
+        return
+    end
+    for _, move in ipairs(moves) do
+        local x, wy, z = getWorldTranslation(move.piece.node)
+        setWorldTranslation(move.piece.node, x, wy + move.delta, z)
+        move.piece.shift = (move.piece.shift or 0) + move.delta
+        state.moved = state.moved + 1
+        state.movedTotal = state.movedTotal + 1
+    end
+    say("guide posts: %d moved to the ground at their own spots (of %d)", #moves, total)
+end
+
 local function doSweep(state, budget)
     if sweep(state, budget) then
+        applyPostMoves(state)
         say("%d moved back to the ground (%d in all); %d of the pieces about to move rest on a structure (a ray down hit a bridge, a slab, a building: they stay or follow it), %d left alone for being more than %.0f m off", state.moved, state.movedTotal, state.onStructure or 0, state.farOff or 0, ReseatDecals.MAX_SHIFT_M)
         state.onStructure, state.farOff = 0, 0
         state.last = { found = #state.pieces, moved = state.moved, offset = state.offset }

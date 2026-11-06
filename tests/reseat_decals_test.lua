@@ -37,6 +37,7 @@ getParent = function(n) return nodes[n].parent end
 getHasClassId = function(n) return nodes[n].shape == true end
 getName = function(n) return nodes[n].name end
 getNumOfChildren = function(n) return #nodes[n].children end
+getChild = function(n, name) for _, c in ipairs(nodes[n].children) do if nodes[c].name == name then return c end end return 0 end
 getChildAt = function(n, i) return nodes[n].children[i + 1] end
 getShapeWorldBoundingSphere = function(n) return nodes[n].x, nodes[n].y, nodes[n].z, 1 end
 getWorldTranslation = function(n) return nodes[n].x, nodes[n].y, nodes[n].z end
@@ -59,8 +60,7 @@ g_currentMission.waila = { refreshDebugHubKeepSelection = function() refreshes =
 local commands = {}
 addConsoleCommand = function(name, _, fn, target) commands[name] = { fn = fn, target = target } end
 dofile("scripts/ReseatDecals.lua")
-check("no post class by default (the guide posts of the map must stay where they are)", #ReseatDecals.POST_NAMES == 0)
-ReseatDecals.POST_NAMES = { "leitpfosten" }               -- (the class itself is still tested)
+check("the post class takes the single posts (r / l), never the Leitpfosten container", #ReseatDecals.POST_NAMES == 2 and ReseatDecals.POST_NAMES[1] == "leitpfosten_r" and ReseatDecals.POST_NAMES[2] == "leitpfosten_l")
 ReseatDecals.LIFT_M = 0                                -- (the old scenarios work with exact positions; the lift has its own test)
 
 check("names: puddles match, road pieces and sign decals do not", ReseatDecals.matches("roadPuddlePiece") and ReseatDecals.matches("intersectionPuddles") and not ReseatDecals.matches("roadPiece") and not ReseatDecals.matches("trafficSignDecal_vis"))
@@ -241,23 +241,28 @@ terrainAt = base
 for _, id in ipairs(puddles) do nodes[id].y = before[id] end
 XMLFile = nil                                         -- (no saved moves for this one)
 dofile("scripts/ReseatDecals.lua")
-ReseatDecals.POST_NAMES = { "leitpfosten" }
 ReseatDecals.LIFT_M = 0
 local bridge = newNode("roadPuddlePiece", group, 90, ground(90, 0) + 9, 0, true)        -- on a bridge: the ground is 9 m below
 local bridge4 = newNode("roadPuddlePiece", group, 94, ground(94, 0) + 4, 0, true)       -- on a low bridge: 4 m, under the 6 m cap: only the ray tells
 local deckNode = newNode("deck", top)
 structures[1] = { minX = 93, maxX = 96, y = ground(94, 0) + 4 - 0.02, node = deckNode }
 local floating = newNode("roadPuddlePiece", group, 97.5, ground(97.5, 0) + 4, 0, true)       -- 4 m up with nothing under it: a deep cut, not a bridge
+local function newPost(x, y, z, name)
+    local id = newNode(name or (x % 2 == 0 and "leitpfosten_l" or "leitpfosten_r"), group, x, y, z, false)
+    newNode("joint", id, 0, 0, 0, false)                                              -- (the breakable joint: what makes a node a post)
+    return id
+end
 local posts, farPost = {}, nil
 for x = 1, 99 do
-    if x <= 19 or (x >= 61 and x <= 79) or x >= 81 then posts[#posts + 1] = newNode("leitpfosten", group, x, ground(x, 3), 3, false) end      -- guide posts: a group whose origin is its foot
+    if x <= 19 or (x >= 61 and x <= 66) or x >= 81 then posts[#posts + 1] = newPost(x, ground(x, 3), 3) end      -- guide posts, each with its own height
 end
-newNode("leitpfosten_r", posts[1], 0, 0, 0, true)                                -- a part of a post: not looked at
-farPost = newNode("leitpfosten", group, 100, ground(100, 3) + 5, 3, false)            -- on a bridge too: 5 m up, a deck under it
+local container = newNode("Leitpfosten", group, 0, 0, 0, false)                         -- the container group at the world origin: never a post
+local noJoint = newNode("leitpfosten_r", group, 50, 0, 3, false)                       -- a node of that name without a joint: not a post
+farPost = newPost(100, ground(100, 3) + 5, 3)                                         -- on a bridge too: 5 m up, a deck under it
 structures[#structures + 1] = { minX = 99, maxX = 101, y = ground(100, 3) + 5 - 0.02, node = deckNode }
-local onDeck = newNode("leitpfosten", group, 105, ground(105, 3) + 4, 3, false)         -- on a deck 4 m up
+local onDeck = newPost(105, ground(105, 3) + 4, 3)                                    -- on a deck 4 m up
 structures[#structures + 1] = { minX = 104, maxX = 106, y = ground(105, 3) + 4 - 0.02, node = deckNode }
-local ownPost = newNode("leitpfosten", group, 108, ground(108, 3) + 0.4, 3, false)      -- 40 cm over the ground, with a collision part of its own that the side rays would hit
+local ownPost = newPost(108, ground(108, 3) + 0.4, 3)                                 -- 40 cm over the ground, with a collision part of its own that the side rays would hit
 local ownPart = newNode("leitpfosten_part", ownPost, 0, 0, 0, true)
 structures[#structures + 1] = { minX = 107.5, maxX = 108.5, y = ground(108, 3) + 0.4 - 0.02, node = ownPart }
 run(2)
@@ -282,10 +287,11 @@ local postsDown, postsStill = 0, 0
 for _, id in ipairs(posts) do
     local x = nodes[id].x
     local want = terrainAt(x, 3)
-    if x >= 61 and x <= 79 and math.abs(nodes[id].y - want) < 1e-6 then postsDown = postsDown + 1 end
+    if x >= 61 and x <= 66 and math.abs(nodes[id].y - want) < 1e-6 then postsDown = postsDown + 1 end
     if (x <= 19 or x >= 81) and nodes[id].y == ground(x, 3) then postsStill = postsStill + 1 end
 end
-check("the guide posts over the lowered stretch stand on the lowered ground again, the others did not move", postsDown == 19 and postsStill == 38)
+check("the six guide posts over the lowered stretch stand on the lowered ground again (each at its own height), the others did not move", postsDown == 6 and postsStill == 38)
+check("the Leitpfosten container at the origin and a node of the name without a joint were not touched", nodes[container].y == 0 and nodes[noJoint].y == 0)
 check("a guide post on a bridge (5 m over the ground, a deck under it) is left alone", nodes[farPost].y == ground(100, 3) + 5)
 check("a guide post on a deck 4 m up is left alone", nodes[onDeck].y == ground(105, 3) + 4)
 check("a ray that hits a post's own part does not count as a structure: that post is moved down", math.abs(nodes[ownPost].y - ground(108, 3)) < 1e-6)
@@ -306,6 +312,22 @@ run(10)
 check("the deck 30 cm lower: the puddle on it follows", math.abs(nodes[bridge4].y - (structures[1].y + offset + ReseatDecals.liftOf("puddles"))) < 1e-6)
 check("the same for the high bridge, past the cap", math.abs(nodes[bridge].y - (ground(90, 0) + 9 - 0.02 - 0.3 + offset + ReseatDecals.liftOf("puddles"))) < 1e-6)
 check("and for the post on its deck", math.abs(nodes[onDeck].y - (structures[3].y + (ReseatDecals.state.offsets.posts or 0))) < 1e-6)
+
+-- a pass that would move far more posts than an edit does is refused (a mistake, like the container that once took every post): 19 of the posts over ground lowered at once
+local postY = {}
+for _, id in ipairs(posts) do postY[id] = nodes[id].y end
+local lowTerrain = terrainAt
+terrainAt = function(x, z) return lowTerrain(x, z) - ((x >= 1 and x <= 19) and 0.5 or 0) end
+local refusedLog
+local oldPrint2 = print
+print = function(text) if tostring(text):find("refused", 1, true) then refusedLog = text end end
+hooks["randomfixes.reseat"](nil)
+run(10)
+print = oldPrint2
+local untouched = true
+for _, id in ipairs(posts) do if nodes[id].y ~= postY[id] then untouched = false end end
+check("19 of 47 posts over lowered ground: the pass is refused for the posts, none moved", untouched and refusedLog ~= nil)
+terrainAt = lowTerrain
 print = realPrint
 realPrint(string.format("reseat_decals_test: %d/%d passed", passed, passed + failed))
 os.exit(failed == 0 and 0 or 1)
