@@ -50,6 +50,7 @@ g_currentMission.waila = { registerDebugTab = function(d) registered[#registered
 local commands = {}
 addConsoleCommand = function(name, _, fn, target) commands[name] = { fn = fn, target = target } end
 dofile("scripts/ReseatDecals.lua")
+ReseatDecals.LIFT_M = 0                                -- (the old scenarios work with exact positions; the lift has its own test)
 
 check("names: puddles match, road pieces and sign decals do not", ReseatDecals.matches("roadPuddlePiece") and ReseatDecals.matches("intersectionPuddles") and not ReseatDecals.matches("roadPiece") and not ReseatDecals.matches("trafficSignDecal_vis"))
 check("median of odd and even lists", ReseatDecals.median({ 3, 1, 2 }) == 2 and ReseatDecals.median({ 4, 1, 3, 2 }) == 2.5 and ReseatDecals.median({}) == nil)
@@ -224,6 +225,14 @@ terrainAt = base
 for _, id in ipairs(puddles) do nodes[id].y = before[id] end
 XMLFile = nil                                         -- (no saved moves for this one)
 dofile("scripts/ReseatDecals.lua")
+ReseatDecals.LIFT_M = 0
+local bridge = newNode("roadPuddlePiece", group, 90, ground(90, 0) + 9, 0, true)        -- on a bridge: the ground is 9 m below
+local posts, farPost = {}, nil
+for x = 1, 99 do
+    if x <= 19 or (x >= 61 and x <= 79) or x >= 81 then posts[#posts + 1] = newNode("leitpfosten", group, x, ground(x, 3), 3, false) end      -- guide posts: a group whose origin is its foot
+end
+newNode("leitpfosten_r", posts[1], 0, 0, 0, true)                                -- a part of a post: not looked at
+farPost = newNode("leitpfosten", group, 100, ground(100, 3) + 5, 3, false)            -- on a bridge too
 run(2)
 check("the scan hook is registered, nothing else", hooks["randomfixes.reseat"] ~= nil and #registered == 0)
 terrainAt = function(x, z) return base(x, z) - ((x >= 20 and x < 40 or x >= 60 and x < 80) and 0.5 or 0) end       -- two stretches of the road lowered by 50 cm (a minority: the median stays the untouched offset)
@@ -242,6 +251,20 @@ run(10)
 local second = 0
 for _, id in ipairs(puddles) do local x = nodes[id].x; if x >= 61 and x <= 79 and math.abs(nodes[id].y - before[id]) > 0.4 then second = second + 1 end end
 check("the whole-map scan reseats the other stretch", second == 19)
+local postsDown, postsStill = 0, 0
+for _, id in ipairs(posts) do
+    local x = nodes[id].x
+    local want = terrainAt(x, 3)
+    if x >= 61 and x <= 79 and math.abs(nodes[id].y - want) < 1e-6 then postsDown = postsDown + 1 end
+    if (x <= 19 or x >= 81) and nodes[id].y == ground(x, 3) then postsStill = postsStill + 1 end
+end
+check("the guide posts over the lowered stretch stand on the lowered ground again, the others did not move", postsDown == 19 and postsStill == 38)
+check("a guide post on a bridge (5 m over the ground) is left alone", nodes[farPost].y == ground(100, 3) + 5)
+check("a puddle 9 m over the ground (a bridge) is left alone", nodes[bridge].y == ground(90, 0) + 9)
+check("shiftFor: beyond MAX_SHIFT_M it says so and does not move", select(2, ReseatDecals.shiftFor(20, 10, 0.02, 0.06)) == true and ReseatDecals.shiftFor(20, 10, 0.02, 0.06) == nil)
+ReseatDecals.LIFT_M = 0.015
+check("a moved puddle gets the lift on top", math.abs(ReseatDecals.shiftFor(9.6, 10, 0.02, 0.06) - (0.42 + 0.015)) < 1e-9)
+check("a puddle within the tolerance is not lifted either", ReseatDecals.shiftFor(10.02, 10, 0.02, 0.06) == nil)
 print = realPrint
 realPrint(string.format("reseat_decals_test: %d/%d passed", passed, passed + failed))
 os.exit(failed == 0 and 0 or 1)

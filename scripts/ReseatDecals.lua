@@ -15,7 +15,7 @@
 
     The log says how many were found, the offset, how far off the pieces are (percentiles) and how many were moved ("[RandomFixes] puddles: ...").
 ]]
-ReseatDecals = { PATTERNS = { "puddle" }, TOLERANCE = 0.06, BUDGET_REQUEST_MS = 8, BUDGET_RESTORE_MS = 1.5, START_DELAY_S = 3, MAX_NODES_PER_SLICE = 4000, FILE = "reseatDecals.xml", MIN_SAVED_M = 0.01, RING_SAMPLES = 8, RING_PART = 0.9, MAX_RING_M = 3 }
+ReseatDecals = { PATTERNS = { "puddle" }, POST_NAMES = { "leitpfosten" }, TOLERANCE = 0.06, BUDGET_REQUEST_MS = 8, BUDGET_RESTORE_MS = 1.5, START_DELAY_S = 3, MAX_NODES_PER_SLICE = 4000, FILE = "reseatDecals.xml", MIN_SAVED_M = 0.01, RING_SAMPLES = 8, RING_PART = 0.9, MAX_RING_M = 3, MAX_SHIFT_M = 3, LIFT_M = 0.015 }
 
 local function say(format, ...)
     print(string.format("[RandomFixes] " .. format, ...))
@@ -29,6 +29,26 @@ function ReseatDecals.matches(name)
         end
     end
     return false
+end
+
+-- What gets reseated: "puddles" are shapes whose name holds PATTERNS (their level is the lowest point of their border, they get the LIFT_M on top); "posts" are the roadside guide posts, groups named exactly
+-- as POST_NAMES, whose origin is their foot (their level is the ground at that spot). Each class has its own normal offset over its level (the median of its members).
+ReseatDecals.CLASS_LIST = { "puddles", "posts" }
+function ReseatDecals.classOf(node, name)
+    local lower = string.lower(name or "")
+    for _, post in ipairs(ReseatDecals.POST_NAMES) do
+        if lower == post then
+            return "posts"
+        end
+    end
+    if ReseatDecals.matches(name) and getHasClassId(node, ClassIds.SHAPE) then
+        return "puddles"
+    end
+    return nil
+end
+
+function ReseatDecals.liftOf(class)
+    return class == "puddles" and ReseatDecals.LIFT_M or 0
 end
 
 function ReseatDecals.median(list)
@@ -61,10 +81,15 @@ function ReseatDecals.percentile(devs, offset, p)
 end
 
 -- how far to move a piece (metres, + up) so that it is back at the ground's height plus the offset; nil when it is within the tolerance
-function ReseatDecals.shiftFor(sphereY, groundY, offset, tolerance)
+-- A puddle that is farther off than MAX_SHIFT_M is not over a cut road but on something else (a bridge, a ramp, a tunnel: the ground is far below it): it is left alone (second return value true).
+-- A puddle that is moved gets LIFT_M on top, so the ground's 1 m triangles do not poke through it.
+function ReseatDecals.shiftFor(sphereY, groundY, offset, tolerance, lift)
     local delta = groundY + offset - sphereY
+    if math.abs(delta) > ReseatDecals.MAX_SHIFT_M then
+        return nil, true
+    end
     if math.abs(delta) > tolerance then
-        return delta
+        return delta + (lift or ReseatDecals.LIFT_M)
     end
     return nil
 end
@@ -208,11 +233,20 @@ local function collect(state, budgetMs)
         local top = state.stack[#state.stack]
         if top.index == 0 then
             local node = top.node
-            if getHasClassId(node, ClassIds.SHAPE) and ReseatDecals.matches(getName(node)) then
-                local cx, _, cz = getShapeWorldBoundingSphere(node)
-                state.pieces[#state.pieces + 1] = { node = node, key = ReseatDecals.keyOf(getName(node), cx, cz), shift = 0, cx = cx, cz = cz }
+            local name = getName(node)
+            local class = ReseatDecals.classOf(node, name)
+            if class ~= nil then
+                local cx, cz
+                if class == "puddles" then
+                    local sx, _, sz = getShapeWorldBoundingSphere(node)
+                    cx, cz = sx, sz
+                else
+                    local px, _, pz = getWorldTranslation(node)
+                    cx, cz = px, pz
+                end
+                state.pieces[#state.pieces + 1] = { node = node, class = class, key = ReseatDecals.keyOf(name, cx, cz), shift = 0, cx = cx, cz = cz }
             end
-            top.count = getNumOfChildren(node)
+            top.count = class == "posts" and 0 or getNumOfChildren(node)       -- (the parts of a post are not looked at)
         end
         if top.index < top.count then
             local child = getChildAt(top.node, top.index)
@@ -231,6 +265,11 @@ local function collect(state, budgetMs)
 end
 
 local function height(piece)
+    if piece.class == "posts" then
+        local x, y, z = getWorldTranslation(piece.node)
+        local ground = getTerrainHeightAtWorldPos(g_terrainNode, x, 0, z)
+        return y, ground, ground
+    end
     local cx, cy, cz, radius = getShapeWorldBoundingSphere(piece.node)
     local ringRadius = ReseatDecals.RING_PART * math.min(radius or 1, ReseatDecals.MAX_RING_M)
     local ring = {}
@@ -243,14 +282,14 @@ local function height(piece)
     return cy, level, rim
 end
 
--- phase 2: the offset of an untouched puddle over its ground (the median), and how scattered they are
+-- phase 2: the offset of an untouched piece over its level (the median of its class), and how scattered they are
 local function measure(state, budgetMs)
     local t0 = now()
     while state.cursor <= #state.pieces do
         local piece = state.pieces[state.cursor]
         local y, ground, rim = height(piece)
         state.devs[state.cursor] = y - ground
-        if rim - ground > 0.02 then
+        if state.pieces[state.cursor].class == "puddles" and rim - ground > 0.02 then
             state.bowls = (state.bowls or 0) + 1
         end
         state.cursor = state.cursor + 1
@@ -271,7 +310,11 @@ local function sweep(state, budgetMs)
         local delta = nil
         if inside then
             y, ground = height(piece)
-            delta = ReseatDecals.shiftFor(y, ground, state.offset, ReseatDecals.TOLERANCE)
+            local far
+            delta, far = ReseatDecals.shiftFor(y, ground, state.offsets[piece.class] or 0, ReseatDecals.TOLERANCE, ReseatDecals.liftOf(piece.class))
+            if far then
+                state.farOff = (state.farOff or 0) + 1
+            end
         end
         if delta ~= nil then
             local x, wy, z = getWorldTranslation(piece.node)
@@ -342,7 +385,8 @@ end
 
 local function doSweep(state, budget)
     if sweep(state, budget) then
-        say("puddles: %d moved back to the ground (%d in all)", state.moved, state.movedTotal)
+        say("%d moved back to the ground (%d in all), %d left alone for being over %.0f m off (bridges, ramps, tunnels)", state.moved, state.movedTotal, state.farOff or 0, ReseatDecals.MAX_SHIFT_M)
+        state.farOff = 0
         state.last = { found = #state.pieces, moved = state.moved, offset = state.offset }
         state.moved = 0
         state.phase = "idle"
@@ -379,7 +423,7 @@ function ReseatDecals.update(dt)
             local restored = 0
             for _, piece in ipairs(state.pieces) do
                 local shift = state.saved[piece.key]
-                if shift ~= nil then
+                if shift ~= nil and math.abs(shift) <= ReseatDecals.MAX_SHIFT_M then
                     local x, wy, z = getWorldTranslation(piece.node)
                     setWorldTranslation(piece.node, x, wy + shift, z)
                     piece.shift = shift
@@ -397,16 +441,30 @@ function ReseatDecals.update(dt)
         end
     elseif state.phase == "measure" then
         if measure(state, state.purpose == "pass" and math.huge or budget) then
-            state.offset = ReseatDecals.median(state.devs) or 0
-            local beyond = 0
-            for _, d in ipairs(state.devs) do
-                if math.abs(d - state.offset) > ReseatDecals.TOLERANCE then
-                    beyond = beyond + 1
+            local byClass = {}
+            for i, d in ipairs(state.devs) do
+                local c = state.pieces[i].class
+                byClass[c] = byClass[c] or {}
+                byClass[c][#byClass[c] + 1] = d
+            end
+            state.offsets = {}
+            for _, c in ipairs(ReseatDecals.CLASS_LIST) do
+                local list = byClass[c]
+                if list ~= nil then
+                    local offset = ReseatDecals.median(list) or 0
+                    state.offsets[c] = offset
+                    local beyond = 0
+                    for _, d in ipairs(list) do
+                        if math.abs(d - offset) > ReseatDecals.TOLERANCE then
+                            beyond = beyond + 1
+                        end
+                    end
+                    say("%s: %.1f cm over the ground at the median; deviation p50 %.1f / p90 %.1f / p99 %.1f cm; %d of %d are beyond the %.0f cm tolerance (they are moved)", c, offset * 100,
+                        ReseatDecals.percentile(list, offset, 0.5) * 100, ReseatDecals.percentile(list, offset, 0.9) * 100, ReseatDecals.percentile(list, offset, 0.99) * 100,
+                        beyond, #list, ReseatDecals.TOLERANCE * 100)
                 end
             end
-            say("puddles: %.1f cm over the ground at the median; deviation p50 %.1f / p90 %.1f / p99 %.1f cm; %d of %d are beyond the %.0f cm tolerance (they are moved)", state.offset * 100,
-                ReseatDecals.percentile(state.devs, state.offset, 0.5) * 100, ReseatDecals.percentile(state.devs, state.offset, 0.9) * 100, ReseatDecals.percentile(state.devs, state.offset, 0.99) * 100,
-                beyond, #state.pieces, ReseatDecals.TOLERANCE * 100)
+            state.offset = state.offsets.puddles or 0
             say("puddles: %d of them have ground lower at their border than the rest of it (the water level is the lowest point there)", state.bowls or 0)
             state.bowls = 0
             state.devs = {}
