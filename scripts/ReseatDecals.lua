@@ -12,7 +12,7 @@
 
     The log says how many were found, the offset, how far off the pieces are (percentiles) and how many were moved ("[RandomFixes] puddles: ...").
 ]]
-ReseatDecals = { PATTERNS = { "puddle" }, TOLERANCE = 0.06, BUDGET_MS = 0.25, START_DELAY_S = 8, MAX_NODES_PER_SLICE = 4000 }
+ReseatDecals = { PATTERNS = { "puddle" }, TOLERANCE = 0.06, BUDGET_MS = 0.25, START_DELAY_S = 3, MAX_NODES_PER_SLICE = 4000, FILE = "reseatDecals.xml", MIN_SAVED_M = 0.01 }
 
 local function say(format, ...)
     print(string.format("[RandomFixes] " .. format, ...))
@@ -66,6 +66,84 @@ function ReseatDecals.shiftFor(sphereY, groundY, offset, tolerance)
     return nil
 end
 
+-- a puddle has no id (the map file's nodes sit at the origin, the vertices carry the world position): its name and where its bounding sphere's centre is in x / z (a height shift leaves that alone) are its key
+function ReseatDecals.keyOf(name, cx, cz)
+    return string.format("%s@%.2f,%.2f", name, cx, cz)
+end
+
+-- what is worth saving: every piece that was moved, by key, with how far (metres, + up); entries of the file that nothing matched yet are kept
+function ReseatDecals.records(pieces, saved)
+    local list, seen = {}, {}
+    for _, piece in ipairs(pieces or {}) do
+        seen[piece.key] = true
+        if math.abs(piece.shift or 0) >= ReseatDecals.MIN_SAVED_M then
+            list[#list + 1] = { key = piece.key, shift = piece.shift }
+        end
+    end
+    for key, shift in pairs(saved or {}) do
+        if not seen[key] then
+            list[#list + 1] = { key = key, shift = shift }
+        end
+    end
+    table.sort(list, function(a, b) return a.key < b.key end)
+    return list
+end
+
+local function savePath()
+    local info = g_currentMission ~= nil and g_currentMission.missionInfo or nil
+    if info == nil or info.savegameDirectory == nil then
+        return nil
+    end
+    return info.savegameDirectory .. "/" .. ReseatDecals.FILE
+end
+
+function ReseatDecals.readFile()
+    local saved, path = {}, savePath()
+    if path == nil or XMLFile == nil then
+        return saved
+    end
+    local xml = XMLFile.loadIfExists ~= nil and XMLFile.loadIfExists("ReseatDecals", path) or nil
+    if xml == nil then
+        return saved
+    end
+    local i = 0
+    while true do
+        local key = string.format("reseatDecals.piece(%d)", i)
+        if not xml:hasProperty(key) then
+            break
+        end
+        local id, shift = xml:getString(key .. "#key"), xml:getFloat(key .. "#shift")
+        if id ~= nil and shift ~= nil then
+            saved[id] = shift
+        end
+        i = i + 1
+    end
+    xml:delete()
+    return saved
+end
+
+function ReseatDecals.save()
+    local path = savePath()
+    if path == nil or XMLFile == nil then
+        return
+    end
+    local state = ReseatDecals.state
+    local records = ReseatDecals.records(state ~= nil and state.pieces or {}, state ~= nil and state.saved or ReseatDecals.readFile())
+    local xml = XMLFile.create("ReseatDecals", path, "reseatDecals")
+    if xml == nil then
+        say("puddles: could not write %s", path)
+        return
+    end
+    for i, record in ipairs(records) do
+        local key = string.format("reseatDecals.piece(%d)", i - 1)
+        xml:setString(key .. "#key", record.key)
+        xml:setFloat(key .. "#shift", record.shift)
+    end
+    xml:save()
+    xml:delete()
+    say("puddles: %d moved puddle(s) written to %s", #records, ReseatDecals.FILE)
+end
+
 local function now() return getTimeSec() * 1000 end
 
 -- phase 1: the scene walked in slices; every matching shape is remembered
@@ -77,7 +155,8 @@ local function collect(state, budgetMs)
         if top.index == 0 then
             local node = top.node
             if getHasClassId(node, ClassIds.SHAPE) and ReseatDecals.matches(getName(node)) then
-                state.pieces[#state.pieces + 1] = { node = node }
+                local cx, _, cz = getShapeWorldBoundingSphere(node)
+                state.pieces[#state.pieces + 1] = { node = node, key = ReseatDecals.keyOf(getName(node), cx, cz), shift = 0 }
             end
             top.count = getNumOfChildren(node)
         end
@@ -125,6 +204,7 @@ local function sweep(state, budgetMs)
         if delta ~= nil then
             local x, wy, z = getWorldTranslation(piece.node)
             setWorldTranslation(piece.node, x, wy + delta, z)
+            piece.shift = (piece.shift or 0) + delta
             state.moved = state.moved + 1
             state.movedTotal = state.movedTotal + 1
         end
@@ -178,7 +258,7 @@ function ReseatDecals.update(dt)
     end
     local state = ReseatDecals.state
     if state == nil then
-        state = { phase = "wait", waited = 0, clock = 0, stack = {}, pieces = {}, devs = {}, cursor = 1, moved = 0, movedTotal = 0 }
+        state = { phase = "wait", waited = 0, clock = 0, stack = {}, pieces = {}, devs = {}, cursor = 1, moved = 0, movedTotal = 0, saved = ReseatDecals.readFile() }
         ReseatDecals.state = state
         ReseatDecals.installHooks()
     end
@@ -193,9 +273,19 @@ function ReseatDecals.update(dt)
         end
     elseif state.phase == "collect" then
         if collect(state, budget) then
+            local restored = 0
+            for _, piece in ipairs(state.pieces) do
+                local shift = state.saved[piece.key]
+                if shift ~= nil then
+                    local x, wy, z = getWorldTranslation(piece.node)
+                    setWorldTranslation(piece.node, x, wy + shift, z)
+                    piece.shift = shift
+                    restored = restored + 1
+                end
+            end
             state.phase = "measure"
             state.cursor = 1
-            say("puddles: %d found in %.0f ms of slices", #state.pieces, now() - state.startedAt)
+            say("puddles: %d found in %.0f ms of slices, %d put back from %s", #state.pieces, now() - state.startedAt, restored, ReseatDecals.FILE)
         end
     elseif state.phase == "measure" then
         if measure(state, budget) then
@@ -240,6 +330,16 @@ function ReseatDecals.update(dt)
             state.phase = "sweep"
         end
     end
+end
+
+if FSCareerMissionInfo ~= nil and not ReseatDecals.saveHooked then
+    ReseatDecals.saveHooked = true
+    FSCareerMissionInfo.saveToXMLFile = Utils.appendedFunction(FSCareerMissionInfo.saveToXMLFile, function()
+        local ok, err = pcall(ReseatDecals.save)
+        if not ok then
+            say("puddles: not saved (%s)", tostring(err))
+        end
+    end)
 end
 
 if FSBaseMission ~= nil and not ReseatDecals.hooked then

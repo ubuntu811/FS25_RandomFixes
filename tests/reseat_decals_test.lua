@@ -88,12 +88,52 @@ check("after the second pass it rests again: nothing booked", st.phase == "idle"
 check("it said what it did", #log > 0 and (function() for _, l in ipairs(log) do if l:find("moved back", 1, true) then return true end end end)())
 
 -- raised ground buries them: moved up
-terrainAt = function(x, z) return base(x, z) + ((x >= 10 and x < 15) and 0.3 or 0) end
+terrainAt = function(x, z) return base(x, z) + ((x >= 50 and x < 60) and -0.4 or 0) + ((x >= 10 and x < 15) and 0.3 or 0) end
 TerrainDeformation.apply()
 run(ReseatDecals.SETTLE_S + ReseatDecals.LATE_S + 3)
 local up = 0
 for _, id in ipairs(puddles) do if nodes[id].x >= 10 and nodes[id].x < 15 and math.abs(nodes[id].y - (terrainAt(nodes[id].x, 0) + 0.02)) < 1e-6 then up = up + 1 end end
 check("raised ground lifts its puddles too", up == 5)
+-- saving: the moved puddles go to the savegame's file and are put back at the next load, before anything is measured
+local files = {}
+local function fakeXml(path)
+    local x = { data = files[path] or {}, path = path }
+    function x:hasProperty(k) for key in pairs(self.data) do if key:sub(1, #k) == k then return true end end return false end
+    function x:getString(k) return self.data[k] end
+    function x:getFloat(k) return self.data[k] end
+    function x:setString(k, v) self.data[k] = v end
+    function x:setFloat(k, v) self.data[k] = v end
+    function x:save() files[self.path] = self.data end
+    function x:delete() end
+    return x
+end
+XMLFile = { create = function(_, path) files[path] = nil; return fakeXml(path) end, loadIfExists = function(_, path) if files[path] then return fakeXml(path) end end }
+g_currentMission.missionInfo = { savegameDirectory = "save1" }
+ReseatDecals.save()
+local saved = files["save1/reseatDecals.xml"]
+local down, up = 0, 0
+for k, v in pairs(saved) do
+    if k:find("#shift", 1, true) then
+        if math.abs(v + 0.4) < 1e-6 then down = down + 1 elseif math.abs(v - 0.3) < 1e-6 then up = up + 1 end
+    end
+end
+check("the moved puddles are in the file: ten 40 cm down, five 30 cm up", down == 10 and up == 5)
+check("records: untouched ones are not written, unmatched file entries are kept", #ReseatDecals.records({ { key = "a", shift = 0 }, { key = "b", shift = 0.5 } }, { c = 0.1 }) == 2)
+
+-- the next session: the nodes are back at the map's heights, the terrain is still lowered
+for _, id in ipairs(puddles) do nodes[id].y = before[id] end
+terrainAt = function(x, z) return base(x, z) + ((x >= 50 and x < 60) and -0.4 or 0) + ((x >= 10 and x < 15) and 0.3 or 0) end
+dofile("scripts/ReseatDecals.lua")
+local restoredLog
+local oldPrint = print
+print = function(text) if tostring(text):find("put back", 1, true) then restoredLog = text end end
+run(ReseatDecals.START_DELAY_S + 2)
+print = oldPrint
+local back = 0
+for _, id in ipairs(puddles) do if math.abs(nodes[id].y - (terrainAt(nodes[id].x, 0) + 0.02)) < 1e-6 then back = back + 1 end end
+check("all 100 sit on the lowered ground right after the load", back == 100)
+check("it put the fifteen back from the file, not by sweeping", restoredLog ~= nil and restoredLog:find("15 put back", 1, true) ~= nil and ReseatDecals.state.movedTotal == 0)
+
 -- no hooks possible: a slow pass every FALLBACK_S instead
 g_terrainDeformationQueue, TerrainDeformation = nil, nil
 dofile("scripts/ReseatDecals.lua")
