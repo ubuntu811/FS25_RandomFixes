@@ -6,14 +6,16 @@
     road pieces, centre lines, parking lines, manholes, tyre tracks) and need nothing.
 
     How: on demand, no hooks and nothing in the background (nobody deforms the terrain every day). The button "Reseat now" of the "Map fixes" tab of WAILA's debug hub (or the console command reseatDecals) walks
-    the scene in small slices (a time budget per frame) and remembers every shape whose name holds PATTERNS, measures each one's height above the ground (the world bounding sphere's centre against the terrain at
-    that spot), takes the MEDIAN as the normal offset of a puddle over its ground (nearly all are untouched), and moves any puddle that is off by more than TOLERANCE, as a whole, up or down by the difference.
-    A bowl cannot be followed, a lowered or raised stretch can. The moves are saved in the savegame (reseatDecals.xml, like MovePlaceablesAdvanced's own file) and put back at the next load, so the button is
-    pressed once per edit, not once per session.
+    the scene in small slices (a time budget per frame) and remembers every shape whose name holds PATTERNS, measures each one's height above its water level (the world bounding sphere's centre against the level),
+    takes the MEDIAN as the normal offset of a puddle over its level (nearly all are untouched), and moves any puddle that is off by more than TOLERANCE, as a whole, up or down by the difference.
+    The level is the lowest ground height on the puddle's BORDER (a ring of samples, the ground's slope taken out; see waterLevel): a lowered or raised stretch moves puddles with it; a pothole INSIDE the border
+    leaves the puddle at the rim, the water fills the hole; a dip that crosses the border lets the water down to the lowest point there, the terrain covers the part of the mesh over higher ground. Fill the dip and
+    press the button again: the level comes back up. The moves are saved in the savegame (reseatDecals.xml, like MovePlaceablesAdvanced's own file) and put back at the next load, so the button is pressed once
+    per edit, not once per session.
 
     The log says how many were found, the offset, how far off the pieces are (percentiles) and how many were moved ("[RandomFixes] puddles: ...").
 ]]
-ReseatDecals = { PATTERNS = { "puddle" }, TOLERANCE = 0.06, BUDGET_MS = 0.25, START_DELAY_S = 3, MAX_NODES_PER_SLICE = 4000, FILE = "reseatDecals.xml", MIN_SAVED_M = 0.01 }
+ReseatDecals = { PATTERNS = { "puddle" }, TOLERANCE = 0.06, BUDGET_MS = 0.25, START_DELAY_S = 3, MAX_NODES_PER_SLICE = 4000, FILE = "reseatDecals.xml", MIN_SAVED_M = 0.01, RING_SAMPLES = 8, RING_PART = 0.9, MAX_RING_M = 3 }
 
 local function say(format, ...)
     print(string.format("[RandomFixes] " .. format, ...))
@@ -145,6 +147,57 @@ function ReseatDecals.save()
     say("puddles: %d moved puddle(s) written to %s", #records, ReseatDecals.FILE)
 end
 
+-- The water level of a piece: where its flat surface stands. A hole inside the piece's border is filled up to the rim (the mesh stays at the rim, over the hole); only ground that is lower AT the border lets
+-- the water out: the level is the lowest point of the border, with the ground's slope taken out (an untouched puddle on a slope keeps its own level). ring: n ground heights evenly round the piece at
+-- ringRadius, the first one towards +x. The slope comes from a plane fitted through them without the ones that sit clearly off it (a dip or a mound at the border must not tilt it). Returns the level and the
+-- plane's height at the centre (the rim).
+local function fitPlane(points)
+    local n, sx, sz, sxx, sxz, szz, sh, sxh, szh = 0, 0, 0, 0, 0, 0, 0, 0, 0
+    for _, p in ipairs(points) do
+        n = n + 1
+        sx, sz, sxx, sxz, szz = sx + p.x, sz + p.z, sxx + p.x * p.x, sxz + p.x * p.z, szz + p.z * p.z
+        sh, sxh, szh = sh + p.h, sxh + p.x * p.h, szh + p.z * p.h
+    end
+    -- h = a + b x + c z: the normal equations by Cramer's rule
+    local function det(m) return m[1] * (m[5] * m[9] - m[6] * m[8]) - m[2] * (m[4] * m[9] - m[6] * m[7]) + m[3] * (m[4] * m[8] - m[5] * m[7]) end
+    local d = det({ n, sx, sz, sx, sxx, sxz, sz, sxz, szz })
+    if math.abs(d) < 1e-12 then
+        return sh / math.max(n, 1), 0, 0
+    end
+    return det({ sh, sx, sz, sxh, sxx, sxz, szh, sxz, szz }) / d, det({ n, sh, sz, sx, sxh, sxz, sz, szh, szz }) / d, det({ n, sx, sh, sx, sxx, sxh, sz, sxz, szh }) / d
+end
+
+function ReseatDecals.waterLevel(ringHeights, ringRadius)
+    local n = #ringHeights
+    local all = {}
+    for i, h in ipairs(ringHeights) do
+        local a = 2 * math.pi * (i - 1) / n
+        all[i] = { x = ringRadius * math.cos(a), z = ringRadius * math.sin(a), h = h }
+    end
+    local a, b, c = fitPlane(all)
+    -- the ones far off the first fit are left out and the plane is fitted again: a dip or a mound at the border must not tilt it (the good ones are only slightly off, the odd one a lot)
+    local worst = 0
+    for _, p in ipairs(all) do
+        worst = math.max(worst, math.abs(p.h - (a + b * p.x + c * p.z)))
+    end
+    if worst > 0.01 then
+        local keep = {}
+        for _, p in ipairs(all) do
+            if math.abs(p.h - (a + b * p.x + c * p.z)) <= 0.5 * worst then
+                keep[#keep + 1] = p
+            end
+        end
+        if #keep >= 4 and #keep < n then
+            a, b, c = fitPlane(keep)
+        end
+    end
+    local level = math.huge
+    for _, p in ipairs(all) do
+        level = math.min(level, p.h - b * p.x - c * p.z)
+    end
+    return math.min(level, a), a
+end
+
 local function now() return getTimeSec() * 1000 end
 
 -- phase 1: the scene walked in slices; every matching shape is remembered
@@ -177,8 +230,16 @@ local function collect(state, budgetMs)
 end
 
 local function height(piece)
-    local cx, cy, cz = getShapeWorldBoundingSphere(piece.node)
-    return cy, getTerrainHeightAtWorldPos(g_terrainNode, cx, 0, cz)
+    local cx, cy, cz, radius = getShapeWorldBoundingSphere(piece.node)
+    local ringRadius = ReseatDecals.RING_PART * math.min(radius or 1, ReseatDecals.MAX_RING_M)
+    local ring = {}
+    local n = ReseatDecals.RING_SAMPLES
+    for i = 1, n do
+        local a = 2 * math.pi * (i - 1) / n
+        ring[i] = getTerrainHeightAtWorldPos(g_terrainNode, cx + math.cos(a) * ringRadius, 0, cz + math.sin(a) * ringRadius)
+    end
+    local level, rim = ReseatDecals.waterLevel(ring, ringRadius)
+    return cy, level, rim
 end
 
 -- phase 2: the offset of an untouched puddle over its ground (the median), and how scattered they are
@@ -186,8 +247,11 @@ local function measure(state, budgetMs)
     local t0 = now()
     while state.cursor <= #state.pieces do
         local piece = state.pieces[state.cursor]
-        local y, ground = height(piece)
+        local y, ground, rim = height(piece)
         state.devs[state.cursor] = y - ground
+        if rim - ground > 0.02 then
+            state.bowls = (state.bowls or 0) + 1
+        end
         state.cursor = state.cursor + 1
         if now() - t0 > budgetMs then
             return false
@@ -313,6 +377,8 @@ function ReseatDecals.update(dt)
             say("puddles: %.1f cm over the ground at the median; deviation p50 %.1f / p90 %.1f / p99 %.1f cm; %d of %d are beyond the %.0f cm tolerance (they are moved)", state.offset * 100,
                 ReseatDecals.percentile(state.devs, state.offset, 0.5) * 100, ReseatDecals.percentile(state.devs, state.offset, 0.9) * 100, ReseatDecals.percentile(state.devs, state.offset, 0.99) * 100,
                 beyond, #state.pieces, ReseatDecals.TOLERANCE * 100)
+            say("puddles: %d of them have ground lower at their border than the rest of it (the water level is the lowest point there)", state.bowls or 0)
+            state.bowls = 0
             state.devs = {}
             state.phase = "sweep"
             state.cursor = 1

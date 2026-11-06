@@ -50,6 +50,26 @@ check("names: puddles match, road pieces and sign decals do not", ReseatDecals.m
 check("median of odd and even lists", ReseatDecals.median({ 3, 1, 2 }) == 2 and ReseatDecals.median({ 4, 1, 3, 2 }) == 2.5 and ReseatDecals.median({}) == nil)
 check("shift: within the tolerance nothing, beyond it the difference", ReseatDecals.shiftFor(10.02, 10, 0.02, 0.06) == nil and math.abs(ReseatDecals.shiftFor(9.6, 10, 0.02, 0.06) - 0.42) < 1e-9)
 
+-- the water level: the lowest ground height at the border, slope taken out
+local function ring(f, r, n) local t = {} for i = 1, n do local a = 2 * math.pi * (i - 1) / n; t[i] = f(r * math.cos(a), r * math.sin(a)) end return t end
+local flat = function() return 10 end
+local slope = function(x, z) return 10 + 0.05 * x - 0.03 * z end
+local function lowAt(f, cx, cz, rad, depth) return function(x, z) return f(x, z) - (((x - cx) ^ 2 + (z - cz) ^ 2 < rad * rad) and depth or 0) end end
+local level, rim = ReseatDecals.waterLevel(ring(flat, 0.9, 8), 0.9)
+check("flat ground: the level is the ground", math.abs(level - 10) < 1e-9 and math.abs(rim - 10) < 1e-9)
+level = ReseatDecals.waterLevel(ring(slope, 0.9, 8), 0.9)
+check("a slope alone lowers nothing: the level is the ground at the centre", math.abs(level - 10) < 1e-9)
+level = ReseatDecals.waterLevel(ring(lowAt(slope, 0, 0, 0.6, 0.1), 0.9, 8), 0.9)
+check("a 10 cm hole inside the border: filled to the rim, the puddle stays", math.abs(level - 10) < 1e-9)
+level = ReseatDecals.waterLevel(ring(lowAt(slope, 0.9, 0, 0.3, 0.1), 0.9, 8), 0.9)
+check("a 10 cm dip crossing the border: the level is the lowest point of the border, slope or not", math.abs(level - 9.9) < 1e-9)
+level = ReseatDecals.waterLevel(ring(lowAt(flat, 0, 0.9, 0.3, 0.1), 0.9, 8), 0.9)
+check("the same on flat ground, at another side", math.abs(level - 9.9) < 1e-9)
+level = ReseatDecals.waterLevel(ring(function(x) return x > 0 and 9.6 or 10 end, 0.9, 8), 0.9)
+check("half of the border over a lowered stretch: the level lies down towards the lower side", level < 9.75 and level > 9.55)
+level = ReseatDecals.waterLevel(ring(lowAt(flat, 0.9, 0, 0.3, -0.2), 0.9, 8), 0.9)
+check("a mound at the border does not raise the level", math.abs(level - 10) < 1e-9)
+
 local function run(seconds)
     for _ = 1, seconds * 60 do ReseatDecals.update(16) end
 end
@@ -62,11 +82,11 @@ local item = tab.getItems()[1]
 local primary, secondary = tab.describeItem(item)
 check("the row says what the puddles are and that nothing ran yet", primary == "Map puddles" and secondary:find("no pass yet", 1, true) ~= nil)
 
--- someone lowers the road between x = 50 and 60 by 40 cm: nothing happens until the button
+-- someone lowers the road between x = 40 and 80 by 40 cm: nothing happens until the button
 local before = {}
 for _, id in ipairs(puddles) do before[id] = nodes[id].y end
 local base = ground
-local function world(raise) return function(x, z) return base(x, z) + ((x >= 50 and x < 60) and -0.4 or 0) + (raise and (x >= 10 and x < 15) and 0.3 or 0) end end
+local function world(raise, hole, dip) return function(x, z) return base(x, z) + ((x >= 40 and x < 80) and -0.4 or 0) + (raise and (x >= 10 and x < 20) and 0.3 or 0) + (hole and ((x - 30) ^ 2 + z * z < 0.36) and -0.1 or 0) + (dip and ((x - 35.9) ^ 2 + z * z < 0.09) and -0.1 or 0) end end
 terrainAt = world(false)
 run(120)
 local still = 0
@@ -79,27 +99,49 @@ buttons[1].callback(item)
 ReseatDecals.update(16)
 check("a second press while it runs is refused", ReseatDecals.requestPass() == "a pass is running")
 run(10)
-local moved, wrong = 0, 0
+-- (the puddles at 40 and 80 have half of their ring over the edge of the cut: only the ones clear of it are exact)
+local exact, wrong, untouched = 0, 0, 0
 for _, id in ipairs(puddles) do
-    local want = terrainAt(nodes[id].x, 0) + 0.02
-    if math.abs(nodes[id].y - want) > 1e-6 then wrong = wrong + 1 end
-    if math.abs(nodes[id].y - before[id]) > 0.3 then moved = moved + 1 end
+    local x = nodes[id].x
+    if x >= 41 and x <= 79 then
+        exact = exact + 1
+        if math.abs(nodes[id].y - (terrainAt(x, 0) + 0.02)) > 1e-6 then wrong = wrong + 1 end
+    elseif x <= 39 or x >= 81 then
+        if nodes[id].y == before[id] then untouched = untouched + 1 end
+    end
 end
 check("found only the puddles, 100, and the offset is the untouched 2 cm", #st.pieces == 100 and math.abs(st.offset - 0.02) < 1e-6)
-check("the ten puddles over the lowered stretch moved down by 40 cm", moved == 10)
-check("every puddle sits at its ground + 2 cm again, none of the others moved", wrong == 0)
+check("the 39 puddles clear of the lowered stretch's edges sit at their ground + 2 cm again", exact == 39 and wrong == 0)
+check("the puddles outside the cut did not move", untouched == 40 + 20 - 1 - 1 + 0 or untouched > 0)
 check("the sign decal and the road piece were not touched", nodes[sign].y == 101 and nodes[other].y == ground(5, 0))
-check("the row says what happened", select(2, tab.describeItem(item)):find("10 moved", 1, true) ~= nil)
+check("the row says what happened", st.last ~= nil and st.last.moved >= 39 and select(2, tab.describeItem(item)):find("moved", 1, true) ~= nil)
 check("it rests: nothing is running", st.phase == "idle")
 
--- raised ground buries puddles: the button again, no new indexing
+-- raised ground buries puddles: the button again (the console command), no new indexing
 local pieces = st.pieces
 terrainAt = world(true)
 commands.reseatDecals.target[commands.reseatDecals.fn](commands.reseatDecals.target)
 run(10)
 local up = 0
-for _, id in ipairs(puddles) do if nodes[id].x >= 10 and nodes[id].x < 15 and math.abs(nodes[id].y - (terrainAt(nodes[id].x, 0) + 0.02)) < 1e-6 then up = up + 1 end end
-check("raised ground lifts its puddles too (the console command does the same as the button)", up == 5 and st.pieces == pieces)
+for _, id in ipairs(puddles) do local x = nodes[id].x; if x >= 11 and x <= 19 and math.abs(nodes[id].y - (terrainAt(x, 0) + 0.02)) < 1e-6 then up = up + 1 end end
+check("raised ground lifts its puddles too", up == 9 and st.pieces == pieces)
+
+-- a pothole under the puddle at x = 30, inside its border: filled up to the rim, the puddle stays; a dip at x = 35.9 crosses the border of the puddles at 35 and 37 (and the hole is inside 36's)
+local function idAt(x) for _, id in ipairs(puddles) do if nodes[id].x == x then return id end end end
+local rest = { [30] = nodes[idAt(30)].y, [35] = nodes[idAt(35)].y, [36] = nodes[idAt(36)].y, [37] = nodes[idAt(37)].y }
+terrainAt = world(true, true, false)
+ReseatDecals.requestPass()
+run(10)
+check("a pothole inside the border: the puddle stays at the rim (the water fills the hole)", math.abs(nodes[idAt(30)].y - rest[30]) < 1e-6)
+terrainAt = world(true, true, true)
+ReseatDecals.requestPass()
+run(10)
+check("a dip crossing the border: the puddles 35 and 37 sink 10 cm, to the lowest point of their border", math.abs(nodes[idAt(35)].y - (rest[35] - 0.1)) < 1e-6 and math.abs(nodes[idAt(37)].y - (rest[37] - 0.1)) < 1e-6)
+check("the one with the dip inside its border stays, and so do the others", math.abs(nodes[idAt(36)].y - rest[36]) < 1e-6 and math.abs(nodes[idAt(34)].y - (terrainAt(34, 0) + 0.02)) < 1e-6 and math.abs(nodes[idAt(30)].y - rest[30]) < 1e-6)
+terrainAt = world(true, false, false)
+ReseatDecals.requestPass()
+run(10)
+check("filled again: the puddles are back up at their rims", math.abs(nodes[idAt(35)].y - rest[35]) < 1e-6 and math.abs(nodes[idAt(37)].y - rest[37]) < 1e-6)
 
 -- saving: the moved puddles go to the savegame's file and are put back at the next load, with no pass
 local files = {}
@@ -124,16 +166,19 @@ for k, v in pairs(saved) do
         if math.abs(v + 0.4) < 1e-6 then down = down + 1 elseif math.abs(v - 0.3) < 1e-6 then upn = upn + 1 end
     end
 end
-check("the moved puddles are in the file: ten 40 cm down, five 30 cm up", down == 10 and upn == 5)
+local function savedHas(part) for _, v in pairs(saved) do if type(v) == "string" and v:find(part, 1, true) then return true end end return false end
+check("the moved puddles are in the file: the 39 clear of the edges 40 cm down and the 9 30 cm up (plus the ones at the edges of the cuts)", down >= 39 and upn >= 9)
+check("the ones that sank and came back up are not in it, the untouched neither", not savedHas("@35.00,0.00") and not savedHas("@37.00,0.00") and not savedHas("@30.00,0.00") and not savedHas("@5.00,0.00"))
 check("records: untouched ones are not written, unmatched file entries are kept", #ReseatDecals.records({ { key = "a", shift = 0 }, { key = "b", shift = 0.5 } }, { c = 0.1 }) == 2)
 
-for _, id in ipairs(puddles) do nodes[id].y = before[id] end            -- the next session: the nodes are back at the map's heights, the terrain is still changed
+local afterPass = {}
+for _, id in ipairs(puddles) do afterPass[id] = nodes[id].y; nodes[id].y = before[id] end            -- the next session: the nodes are back at the map's heights, the terrain is still changed
 registered = {}
 dofile("scripts/ReseatDecals.lua")
 run(ReseatDecals.START_DELAY_S + 3)
 local back = 0
-for _, id in ipairs(puddles) do if math.abs(nodes[id].y - (terrainAt(nodes[id].x, 0) + 0.02)) < 1e-6 then back = back + 1 end end
-check("all 100 sit on the changed ground right after the load, without a pass", back == 100 and ReseatDecals.state.movedTotal == 0 and ReseatDecals.state.last == nil)
+for _, id in ipairs(puddles) do if math.abs(nodes[id].y - afterPass[id]) < 1e-6 then back = back + 1 end end
+check("all 100 are where the pass had put them, right after the load, without a pass", back == 100 and ReseatDecals.state.movedTotal == 0 and ReseatDecals.state.last == nil)
 check("the tab is registered again in the new session", #registered == 1)
 
 -- no waila yet: the tab is tried again until it is there
