@@ -319,6 +319,7 @@ for _, id in ipairs(posts) do postY[id] = nodes[id].y end
 local lowTerrain = terrainAt
 terrainAt = function(x, z) return lowTerrain(x, z) - ((x >= 1 and x <= 19) and 0.5 or 0) end
 local refusedLog
+ReseatDecals.POST_MAX_SHARE = 0.10                              -- (the cap is off by default: this one switches it on)
 local oldPrint2 = print
 print = function(text) if tostring(text):find("refused", 1, true) then refusedLog = text end end
 hooks["randomfixes.reseat"](nil)
@@ -326,7 +327,13 @@ run(10)
 print = oldPrint2
 local untouched = true
 for _, id in ipairs(posts) do if nodes[id].y ~= postY[id] then untouched = false end end
-check("19 of 47 posts over lowered ground: the pass is refused for the posts, none moved", untouched and refusedLog ~= nil)
+check("with the cap switched on, 19 of 47 posts over lowered ground: the pass is refused for the posts, none moved", untouched and refusedLog ~= nil)
+ReseatDecals.POST_MAX_SHARE = nil
+hooks["randomfixes.reseat"](nil)
+run(10)
+local followed = 0
+for _, id in ipairs(posts) do if nodes[id].x <= 19 and math.abs(nodes[id].y - terrainAt(nodes[id].x, 3)) < 1e-6 then followed = followed + 1 end end
+check("with the cap off (the default) the same 19 posts follow the ground", followed == 19)
 terrainAt = lowTerrain
 print = realPrint
 realPrint(string.format("reseat_decals_test: %d/%d passed", passed, passed + failed))

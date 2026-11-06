@@ -15,7 +15,7 @@
 
     The log says how many were found, the offset, how far off the pieces are (percentiles) and how many were moved ("[RandomFixes] puddles: ...").
 ]]
-ReseatDecals = { PATTERNS = { "puddle" }, POST_NAMES = { "leitpfosten_r", "leitpfosten_l" }, POST_MAX_SHARE = 0.10, POST_MAX_MIN = 8, TOLERANCE = 0.06, BUDGET_REQUEST_MS = 8, BUDGET_RESTORE_MS = 1.5, START_DELAY_S = 3, MAX_NODES_PER_SLICE = 4000, FILE = "reseatDecals.xml", MIN_SAVED_M = 0.01, RING_SAMPLES = 8, RING_PART = 0.9, MAX_RING_M = 3, MAX_SHIFT_M = 6, LIFT_M = 0.015, RAY_UP_M = 0.3, RAY_LEN_M = 0.7, POST_SIDE_M = 0.3 }
+ReseatDecals = { PATTERNS = { "puddle" }, POST_NAMES = { "leitpfosten_r", "leitpfosten_l" }, POST_MAX_SHARE = nil, POST_MAX_MIN = 8, TOLERANCE = 0.06, BUDGET_REQUEST_MS = 8, BUDGET_RESTORE_MS = 1.5, START_DELAY_S = 3, MAX_NODES_PER_SLICE = 4000, FILE = "reseatDecals.xml", MIN_SAVED_M = 0.01, RING_SAMPLES = 8, RING_PART = 0.9, MAX_RING_M = 3, MAX_SHIFT_M = 6, LIFT_M = 0.015, RAY_UP_M = 0.3, RAY_LEN_M = 0.7, POST_SIDE_M = 0.3 }
 
 local function say(format, ...)
     print(string.format("[RandomFixes] " .. format, ...))
@@ -35,7 +35,7 @@ end
 -- as POST_NAMES ("leitpfosten_r" / "leitpfosten_l"), each with its own height; their level is the ground at that spot. Both are MOVED as a whole, up or down. A post is a dynamic body on a breakable joint, and
 -- moving its node moves its collision body with it (measured with reseatPostTest: node and "coli" +0.30 m together, and it stayed there). Safeguards, after a first version moved the "Leitpfosten" CONTAINER
 -- groups (one sits at the world origin) and took every post of the map with it: only nodes that have a "joint" child are taken, never the containers; a post with a structure under it is left alone or follows
--- it; and a pass that would move more than POST_MAX_SHARE of all the posts (at least POST_MAX_MIN) is refused: that is a mistake, not an edit.
+-- it; and, only when POST_MAX_SHARE is set (it is off: nil; e.g. 0.10 = at most 10% of all the posts, at least POST_MAX_MIN, per pass), a pass that would move more is refused.
 ReseatDecals.CLASS_LIST = { "puddles", "posts" }
 function ReseatDecals.classOf(node, name)
     local lower = string.lower(name or "")
@@ -487,7 +487,7 @@ local function applyPostMoves(state)
             total = total + 1
         end
     end
-    if #moves > math.max(ReseatDecals.POST_MAX_MIN, ReseatDecals.POST_MAX_SHARE * total) then
+    if ReseatDecals.POST_MAX_SHARE ~= nil and #moves > math.max(ReseatDecals.POST_MAX_MIN, ReseatDecals.POST_MAX_SHARE * total) then
         say("guide posts: %d of %d would be moved: refused, that is far more than an edit does (nothing was moved)", #moves, total)
         return
     end
