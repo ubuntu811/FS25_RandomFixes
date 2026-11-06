@@ -15,7 +15,7 @@
 
     The log says how many were found, the offset, how far off the pieces are (percentiles) and how many were moved ("[RandomFixes] puddles: ...").
 ]]
-ReseatDecals = { PATTERNS = { "puddle" }, POST_NAMES = { "leitpfosten_r", "leitpfosten_l" }, POST_MAX_SHARE = nil, POST_MAX_MIN = 8, MIN_MEMBERS = 20, DEFAULT_OFFSET = { puddles = 0.002, posts = 0 }, TOLERANCE = 0.06, BUDGET_REQUEST_MS = 8, BUDGET_RESTORE_MS = 1.5, START_DELAY_S = 3, MAX_NODES_PER_SLICE = 4000, FILE = "reseatDecals.xml", MIN_SAVED_M = 0.01, RING_SAMPLES = 8, RING_PART = 0.9, MAX_RING_M = 3, MAX_SHIFT_M = 6, LIFT_M = 0.015, RAY_UP_M = 0.3, RAY_LEN_M = 0.7, POST_SIDE_M = 0.3 }
+ReseatDecals = { PATTERNS = { "puddle" }, POST_NAMES = { "leitpfosten_r", "leitpfosten_l" }, POST_MAX_SHARE = nil, POST_MAX_MIN = 8, MIN_MEMBERS = 20, DEFAULT_OFFSET = { puddles = 0.002, posts = 0 }, TOLERANCE = 0.06, BUDGET_REQUEST_MS = 8, BUDGET_RESTORE_MS = 6, START_DELAY_S = 2, MAX_NODES_PER_SLICE = 4000, FILE = "reseatDecals.xml", MIN_SAVED_M = 0.01, RING_SAMPLES = 8, RING_PART = 0.9, MAX_RING_M = 3, MAX_SHIFT_M = 6, LIFT_M = 0.015, RAY_UP_M = 0.3, RAY_LEN_M = 0.7, POST_SIDE_M = 0.3 }
 
 local function say(format, ...)
     print(string.format("[RandomFixes] " .. format, ...))
@@ -117,17 +117,17 @@ end
 
 -- what is worth saving: every piece that was moved, by key, with how far (metres, + up); entries of the file that nothing matched are kept only while the scene is not indexed (a save right after loading must
 -- not lose them), once it is they are dropped (a piece that is no longer reseated, like the guide posts, must not stay in the file)
-function ReseatDecals.records(pieces, saved, indexed)
+function ReseatDecals.records(pieces, saved, indexed, savedPaths)
     local list, seen = {}, {}
     for _, piece in ipairs(pieces or {}) do
         seen[piece.key] = true
         if math.abs(piece.shift or 0) >= ReseatDecals.MIN_SAVED_M then
-            list[#list + 1] = { key = piece.key, shift = piece.shift }
+            list[#list + 1] = { key = piece.key, shift = piece.shift, path = piece.path and table.concat(piece.path, ",") or nil }
         end
     end
     for key, shift in pairs(saved or {}) do
         if not seen[key] and not indexed then
-            list[#list + 1] = { key = key, shift = shift }
+            list[#list + 1] = { key = key, shift = shift, path = savedPaths and savedPaths[key] or nil }
         end
     end
     table.sort(list, function(a, b) return a.key < b.key end)
@@ -143,13 +143,13 @@ local function savePath()
 end
 
 function ReseatDecals.readFile()
-    local saved, path = {}, savePath()
+    local saved, paths, path = {}, {}, savePath()
     if path == nil or XMLFile == nil then
-        return saved
+        return saved, paths
     end
     local xml = XMLFile.loadIfExists ~= nil and XMLFile.loadIfExists("ReseatDecals", path) or nil
     if xml == nil then
-        return saved
+        return saved, paths
     end
     local i = 0
     while true do
@@ -160,11 +160,12 @@ function ReseatDecals.readFile()
         local id, shift = xml:getString(key .. "#key"), xml:getFloat(key .. "#shift")
         if id ~= nil and shift ~= nil then
             saved[id] = shift
+            paths[id] = xml:getString(key .. "#path")
         end
         i = i + 1
     end
     xml:delete()
-    return saved
+    return saved, paths
 end
 
 function ReseatDecals.save()
@@ -173,7 +174,11 @@ function ReseatDecals.save()
         return
     end
     local state = ReseatDecals.state
-    local records = ReseatDecals.records(state ~= nil and state.pieces or {}, state ~= nil and state.saved or ReseatDecals.readFile(), state ~= nil and state.indexed)
+    local fileSaved, filePaths
+    if state == nil then
+        fileSaved, filePaths = ReseatDecals.readFile()
+    end
+    local records = ReseatDecals.records(state ~= nil and state.pieces or {}, state ~= nil and state.saved or fileSaved, state ~= nil and state.indexed, state ~= nil and state.savedPaths or filePaths)
     local xml = XMLFile.create("ReseatDecals", path, "reseatDecals")
     if xml == nil then
         say("puddles: could not write %s", path)
@@ -183,6 +188,9 @@ function ReseatDecals.save()
         local key = string.format("reseatDecals.piece(%d)", i - 1)
         xml:setString(key .. "#key", record.key)
         xml:setFloat(key .. "#shift", record.shift)
+        if record.path ~= nil and record.path ~= "" then
+            xml:setString(key .. "#path", record.path)
+        end
     end
     xml:save()
     xml:delete()
@@ -314,14 +322,18 @@ local function collect(state, budgetMs)
                     local px, _, pz = getWorldTranslation(node)
                     cx, cz = px, pz
                 end
-                state.pieces[#state.pieces + 1] = { node = node, class = class, key = ReseatDecals.keyOf(name, cx, cz), shift = 0, cx = cx, cz = cz }
+                local path = {}
+                for i = 2, #state.stack do
+                    path[#path + 1] = state.stack[i].pos
+                end
+                state.pieces[#state.pieces + 1] = { node = node, class = class, key = ReseatDecals.keyOf(name, cx, cz), shift = 0, cx = cx, cz = cz, path = path }
             end
             top.count = class == "posts" and 0 or getNumOfChildren(node)       -- (the parts of a post are not looked at)
         end
         if top.index < top.count then
             local child = getChildAt(top.node, top.index)
             top.index = top.index + 1
-            state.stack[#state.stack + 1] = { node = child, index = 0, count = 0 }
+            state.stack[#state.stack + 1] = { node = child, index = 0, count = 0, pos = top.index - 1 }
         else
             state.stack[#state.stack] = nil
         end
@@ -417,7 +429,8 @@ end
 -- On demand: nothing runs in the background. At the start of a mission the saved moves are put back (only when the savegame has any); a pass (find, measure, move the ones that are off) runs when asked for:
 -- the button of the "Map fixes" tab in WAILA's hub (ReseatDecals.requestPass), or the console command reseatDecals.
 local function newState()
-    return { phase = "wait", waited = 0, stack = {}, pieces = {}, devs = {}, cursor = 1, moved = 0, movedTotal = 0, postMoves = {}, saved = ReseatDecals.readFile(), indexed = false, purpose = nil, wantPass = false }
+    local saved, savedPaths = ReseatDecals.readFile()
+    return { phase = "wait", waited = 0, stack = {}, pieces = {}, devs = {}, cursor = 1, moved = 0, movedTotal = 0, postMoves = {}, saved = saved, savedPaths = savedPaths, fastKeys = {}, indexed = false, purpose = nil, wantPass = false }
 end
 
 -- the walk starts at the map file's own nodes (the terrain's parent: the map's top-level groups hang there), not at the root of the whole mission scene with every placeable and vehicle in it
@@ -528,6 +541,64 @@ local function doSweep(state, budget)
     end
 end
 
+-- Putting the saved moves back without walking the scene: a record that has the piece's child-index path from the search root is resolved directly (a few calls each), checked (the name, and the position the
+-- key says), and moved. Returns how many were put back and how many could not be resolved (those need the walk).
+local function positionOf(class, node)
+    if class == "puddles" then
+        local x, _, z = getShapeWorldBoundingSphere(node)
+        return x, z
+    end
+    local x, _, z = getWorldTranslation(node)
+    return x, z
+end
+
+local function fastRestore(state)
+    local restored, failed = 0, 0
+    local root = searchRoot()
+    for key, shift in pairs(state.saved) do
+        local ok = false
+        local pathText = state.savedPaths ~= nil and state.savedPaths[key] or nil
+        if math.abs(shift) > ReseatDecals.MAX_SHIFT_M then
+            ok = true                                                     -- (a move that big is ignored, not looked for)
+        elseif pathText ~= nil and pathText ~= "" then
+            local node = root
+            for index in string.gmatch(pathText, "[^,]+") do
+                node = node ~= nil and node ~= 0 and getChildAt(node, tonumber(index)) or nil
+            end
+            if node ~= nil and node ~= 0 then
+                local name = getName(node)
+                local class = ReseatDecals.classOf(node, name)
+                if class ~= nil then
+                    local cx, cz = positionOf(class, node)
+                    if ReseatDecals.keyOf(name, cx, cz) == key then
+                        local x, wy, z = getWorldTranslation(node)
+                        setWorldTranslation(node, x, wy + shift, z)
+                        state.pieces[#state.pieces + 1] = { node = node, class = class, key = key, shift = shift, cx = cx, cz = cz, path = ReseatDecals.parsePath(pathText) }
+                        state.fastKeys[key] = true
+                        ok = true
+                    end
+                end
+            end
+        end
+        if ok then
+            if math.abs(shift) <= ReseatDecals.MAX_SHIFT_M then
+                restored = restored + 1
+            end
+        else
+            failed = failed + 1
+        end
+    end
+    return restored, failed
+end
+
+function ReseatDecals.parsePath(text)
+    local path = {}
+    for index in string.gmatch(text or "", "[^,]+") do
+        path[#path + 1] = tonumber(index)
+    end
+    return path
+end
+
 function ReseatDecals.update(dt)
     if g_currentMission == nil or g_terrainNode == nil or g_client == nil then
         return
@@ -548,7 +619,13 @@ function ReseatDecals.update(dt)
         state.waited = state.waited + dt / 1000
         if state.waited >= ReseatDecals.START_DELAY_S then
             if next(state.saved) ~= nil then
-                startCollect(state, "restore")
+                local restored, failed = fastRestore(state)
+                say("puddles: %d put back from %s by their saved places in the scene%s", restored, ReseatDecals.FILE, failed > 0 and string.format(", %d could not be found that way: walking the scene for them", failed) or "")
+                if failed > 0 then
+                    startCollect(state, "restore")
+                else
+                    state.phase = "idle"
+                end
             else
                 state.phase = "idle"
             end
@@ -559,10 +636,12 @@ function ReseatDecals.update(dt)
             for _, piece in ipairs(state.pieces) do
                 local shift = state.saved[piece.key]
                 if shift ~= nil and math.abs(shift) <= ReseatDecals.MAX_SHIFT_M then
-                    local x, wy, z = getWorldTranslation(piece.node)
-                    setWorldTranslation(piece.node, x, wy + shift, z)
+                    if not state.fastKeys[piece.key] then              -- (the ones the fast restore put back are already where they belong: only remembered)
+                        local x, wy, z = getWorldTranslation(piece.node)
+                        setWorldTranslation(piece.node, x, wy + shift, z)
+                        restored = restored + 1
+                    end
                     piece.shift = shift
-                    restored = restored + 1
                 end
             end
             state.indexed = true

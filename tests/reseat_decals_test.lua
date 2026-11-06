@@ -212,6 +212,26 @@ local back = 0
 for _, id in ipairs(puddles) do if math.abs(nodes[id].y - afterPass[id]) < 1e-6 then back = back + 1 end end
 check("all 100 are where the pass had put them, right after the load, without a pass", back == 100 and ReseatDecals.state.movedTotal == 0 and ReseatDecals.state.last == nil)
 check("the tab is registered again in the new session", #registered == 1)
+check("the saved puddles were put back by their places in the scene: no walk of the scene at all", ReseatDecals.state.visited == nil and next(ReseatDecals.state.fastKeys) ~= nil)
+-- a pass after that finds them where they belong and does not move them a second time
+ReseatDecals.requestPass()
+run(10)
+local twice = 0
+for _, id in ipairs(puddles) do if math.abs(nodes[id].y - afterPass[id]) > 1e-6 and nodes[id].x >= 21 and nodes[id].x <= 79 then twice = twice + 1 end end
+check("a pass after the fast restore does not apply the saved moves a second time", twice == 0)
+-- a path that no longer fits (the map file changed): that puddle is looked for by the walk, the others still come from the paths
+local fileData = files["save1/reseatDecals.xml"]
+local broken = 0
+for k, v in pairs(fileData) do if broken == 0 and k:find("#path", 1, true) then fileData[k] = "9,9,9,9"; broken = 1 end end
+for _, id in ipairs(puddles) do nodes[id].y = before[id] end
+registered = {}
+dofile("scripts/ReseatDecals.lua")
+ReseatDecals.POST_NAMES = { "leitpfosten" }
+run(ReseatDecals.START_DELAY_S + 10)
+local back2 = 0
+for _, id in ipairs(puddles) do if math.abs(nodes[id].y - afterPass[id]) < 1e-6 then back2 = back2 + 1 end end
+check("one broken path: the walk finds that one, all 100 are still where the pass had put them", back2 == 100 and ReseatDecals.state.visited ~= nil)
+
 
 -- no waila yet: the tab is tried again until it is there
 registered = {}
