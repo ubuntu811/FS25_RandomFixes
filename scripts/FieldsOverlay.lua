@@ -227,3 +227,22 @@ if InGameMenuMapFrame ~= nil and Utils ~= nil and Utils.appendedFunction ~= nil 
         InGameMenuMapFrame.onFrameClose = Utils.appendedFunction(InGameMenuMapFrame.onFrameClose, guarded(function() FieldsOverlay.menuClosed() end))
     end
 end
+
+-- A switch for a test without a restart (field work with AI workers makes the engine regenerate the whole map's field picture more often than the game's 5 s: is that what costs frames?):
+-- rfFieldsOverlay off | on | gap <ms>
+if addConsoleCommand ~= nil and not FieldsOverlay.commandAdded then
+    FieldsOverlay.commandAdded = true
+    addConsoleCommand("rfFieldsOverlay", "rfFieldsOverlay [off|on|gap <ms>]: the faster refresh of the minimap's field picture while there is field work (off = the game's own 5 s timer)", "consoleSwitch", FieldsOverlay)
+    function FieldsOverlay:consoleSwitch(what, value)
+        if what == "off" then
+            FieldsOverlay.ENABLED = false
+        elseif what == "on" then
+            FieldsOverlay.ENABLED = true
+        elseif what == "gap" and tonumber(value) ~= nil then
+            FieldsOverlay.MIN_GAP_MS = math.max(500, tonumber(value))
+        elseif what ~= nil then
+            return "usage: rfFieldsOverlay [off|on|gap <ms>]"
+        end
+        return string.format("fields overlay: %s, next generation %d ms after the last one while there is field work (the game's own wait is 5000)", FieldsOverlay.ENABLED and "on" or "off", FieldsOverlay.MIN_GAP_MS)
+    end
+end
