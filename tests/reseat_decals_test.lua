@@ -11,10 +11,12 @@ local nodes, nextId = {}, 1
 local function newNode(name, parent, x, y, z, isShape)
     local id = nextId; nextId = nextId + 1
     nodes[id] = { name = name, children = {}, x = x or 0, y = y or 0, z = z or 0, shape = isShape }
-    if parent then table.insert(nodes[parent].children, id) end
+    if parent then table.insert(nodes[parent].children, id); nodes[id].parent = parent end
     return id
 end
-local root = newNode("root")
+local top = newNode("top")
+local root = newNode("mapRoot", top)
+local terrainNode = newNode("terrain", root)
 local group = newNode("wetnessPieces", root)
 local ground = function(x, z) return 100 + 0.01 * x end                  -- a gentle slope
 local terrainAt = function(x, z) return ground(x, z) end
@@ -24,11 +26,14 @@ for i = 0, 99 do
     puddles[#puddles + 1] = newNode(i % 2 == 0 and "roadPuddlePiece" or "intersectionPuddles", group, x, ground(x, 0) + 0.02, 0, true)
 end
 local other = newNode("roadPiece", group, 5, ground(5, 0), 0, true)
+local placeables = newNode("placeables", top)
+local foreign = newNode("roadPuddlePiece", placeables, 7, 500, 0, true)        -- not in the map file: not to be found or moved
 local sign = newNode("trafficSignDecal_vis", group, 5, 101, 0, true)
 
-g_currentMission, g_terrainNode, g_client = {}, 1, {}
+g_currentMission, g_terrainNode, g_client = { terrainRootNode = terrainNode }, 1, {}
 ClassIds = { SHAPE = 1 }
-getRootNode = function() return root end
+getRootNode = function() return top end
+getParent = function(n) return nodes[n].parent end
 getHasClassId = function(n) return nodes[n].shape == true end
 getName = function(n) return nodes[n].name end
 getNumOfChildren = function(n) return #nodes[n].children end
@@ -110,7 +115,7 @@ for _, id in ipairs(puddles) do
         if nodes[id].y == before[id] then untouched = untouched + 1 end
     end
 end
-check("found only the puddles, 100, and the offset is the untouched 2 cm", #st.pieces == 100 and math.abs(st.offset - 0.02) < 1e-6)
+check("found only the map's puddles, 100 (the one among the placeables is not looked at), and the offset is the untouched 2 cm", #st.pieces == 100 and math.abs(st.offset - 0.02) < 1e-6 and nodes[foreign].y == 500)
 check("the 39 puddles clear of the lowered stretch's edges sit at their ground + 2 cm again", exact == 39 and wrong == 0)
 check("the puddles outside the cut did not move", untouched == 40 + 20 - 1 - 1 + 0 or untouched > 0)
 check("the sign decal and the road piece were not touched", nodes[sign].y == 101 and nodes[other].y == ground(5, 0))
@@ -190,6 +195,26 @@ check("without WAILA nothing is registered and nothing breaks", #registered == 0
 g_currentMission.waila = { registerDebugTab = function(d) registered[#registered + 1] = d end }
 run(1)
 check("when WAILA appears the tab follows", #registered == 1 and ReseatDecals.tabDone)
+
+-- a WAILA with addDebugAction: the button is a row of its Terrain tab, no tab of its own; after a WAILA reload (a new list) it is added again
+registered = {}
+local terrainRows = {}
+local function wailaWith() return { registerDebugTab = function(d) registered[#registered + 1] = d end, actionEntries = { terrain = terrainRows }, addDebugAction = function(id, entry) if id ~= "terrain" then return false end for i = #terrainRows, 1, -1 do if terrainRows[i].key == entry.key then table.remove(terrainRows, i) end end table.insert(terrainRows, entry); return true end } end
+g_currentMission.waila = wailaWith()
+dofile("scripts/ReseatDecals.lua")
+run(2)
+check("with addDebugAction: one row in the Terrain tab, no tab of its own", #terrainRows == 1 and #registered == 0 and terrainRows[1].key == "randomfixes.reseat")
+check("the row says what the puddles are doing and is instant", terrainRows[1].getLabel():find("puddles", 1, true) ~= nil and terrainRows[1].instant == true)
+run(ReseatDecals.START_DELAY_S)
+terrainRows[1].run()
+run(10)
+check("the row's Run starts the pass", ReseatDecals.state.last ~= nil)
+run(1)
+check("it does not add the row again every frame", #terrainRows == 1)
+terrainRows = {}
+g_currentMission.waila = wailaWith()
+run(1)
+check("WAILA reloaded (a new list): the row is added again", #terrainRows == 1)
 print = realPrint
 realPrint(string.format("reseat_decals_test: %d/%d passed", passed, passed + failed))
 os.exit(failed == 0 and 0 or 1)

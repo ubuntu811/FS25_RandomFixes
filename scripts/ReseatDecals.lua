@@ -6,7 +6,7 @@
     road pieces, centre lines, parking lines, manholes, tyre tracks) and need nothing.
 
     How: on demand, no hooks and nothing in the background (nobody deforms the terrain every day). The button "Reseat now" of the "Map fixes" tab of WAILA's debug hub (or the console command reseatDecals) walks
-    the scene in small slices (a time budget per frame) and remembers every shape whose name holds PATTERNS, measures each one's height above its water level (the world bounding sphere's centre against the level),
+    the map file's nodes (the terrain's parent, not the whole mission scene) in small slices (a time budget per frame: 8 ms for a pass somebody asked for, 1.5 ms for putting the saved moves back at the start); measuring and moving the puddles is one go and remembers every shape whose name holds PATTERNS, measures each one's height above its water level (the world bounding sphere's centre against the level),
     takes the MEDIAN as the normal offset of a puddle over its level (nearly all are untouched), and moves any puddle that is off by more than TOLERANCE, as a whole, up or down by the difference.
     The level is the lowest ground height on the puddle's BORDER (a ring of samples, the ground's slope taken out; see waterLevel): a lowered or raised stretch moves puddles with it; a pothole INSIDE the border
     leaves the puddle at the rim, the water fills the hole; a dip that crosses the border lets the water down to the lowest point there, the terrain covers the part of the mesh over higher ground. Fill the dip and
@@ -15,7 +15,7 @@
 
     The log says how many were found, the offset, how far off the pieces are (percentiles) and how many were moved ("[RandomFixes] puddles: ...").
 ]]
-ReseatDecals = { PATTERNS = { "puddle" }, TOLERANCE = 0.06, BUDGET_MS = 0.25, START_DELAY_S = 3, MAX_NODES_PER_SLICE = 4000, FILE = "reseatDecals.xml", MIN_SAVED_M = 0.01, RING_SAMPLES = 8, RING_PART = 0.9, MAX_RING_M = 3 }
+ReseatDecals = { PATTERNS = { "puddle" }, TOLERANCE = 0.06, BUDGET_REQUEST_MS = 8, BUDGET_RESTORE_MS = 1.5, START_DELAY_S = 3, MAX_NODES_PER_SLICE = 4000, FILE = "reseatDecals.xml", MIN_SAVED_M = 0.01, RING_SAMPLES = 8, RING_PART = 0.9, MAX_RING_M = 3 }
 
 local function say(format, ...)
     print(string.format("[RandomFixes] " .. format, ...))
@@ -222,6 +222,7 @@ local function collect(state, budgetMs)
             state.stack[#state.stack] = nil
         end
         steps = steps + 1
+        state.visited = (state.visited or 0) + 1
         if steps >= ReseatDecals.MAX_NODES_PER_SLICE or (steps % 64 == 0 and now() - t0 > budgetMs) then
             return false
         end
@@ -287,8 +288,18 @@ local function newState()
     return { phase = "wait", waited = 0, stack = {}, pieces = {}, devs = {}, cursor = 1, moved = 0, movedTotal = 0, saved = ReseatDecals.readFile(), indexed = false, purpose = nil, wantPass = false }
 end
 
+-- the walk starts at the map file's own nodes (the terrain's parent: the map's top-level groups hang there), not at the root of the whole mission scene with every placeable and vehicle in it
+local function searchRoot()
+    local terrain = g_currentMission ~= nil and g_currentMission.terrainRootNode or nil
+    local parent = terrain ~= nil and terrain ~= 0 and getParent ~= nil and getParent(terrain) or nil
+    if parent ~= nil and parent ~= 0 then
+        return parent
+    end
+    return getRootNode()
+end
+
 local function startCollect(state, purpose)
-    state.stack = { { node = getRootNode(), index = 0, count = 0 } }
+    state.stack = { { node = searchRoot(), index = 0, count = 0 } }
     state.pieces = {}
     state.purpose = purpose
     state.phase = "collect"
@@ -322,11 +333,21 @@ function ReseatDecals.status()
     return state.indexed and "found " .. #state.pieces .. " puddles, no pass yet" or "no pass yet this session"
 end
 
+local function doSweep(state, budget)
+    if sweep(state, budget) then
+        say("puddles: %d moved back to the ground (%d in all)", state.moved, state.movedTotal)
+        state.last = { found = #state.pieces, moved = state.moved, offset = state.offset }
+        state.moved = 0
+        state.phase = "idle"
+    end
+end
+
 function ReseatDecals.update(dt)
     if g_currentMission == nil or g_terrainNode == nil or g_client == nil then
         return
     end
-    if not ReseatDecals.tabDone then
+    local waila = g_currentMission.waila
+    if not ReseatDecals.tabDone or (ReseatDecals.addedTo ~= nil and waila ~= nil and waila.actionEntries ~= nil and waila.actionEntries.terrain ~= ReseatDecals.addedTo) then
         ReseatDecals.registerTab()
     end
     local state = ReseatDecals.state
@@ -334,7 +355,9 @@ function ReseatDecals.update(dt)
         state = newState()
         ReseatDecals.state = state
     end
-    local budget = ReseatDecals.BUDGET_MS
+    -- a pass somebody asked for runs at once: the walk of the map's nodes in 8 ms slices (about half a second, the first time only), then every new height is worked out and set in one go (a few thousand
+    -- ground lookups, tens of milliseconds, once); putting the saved moves back at the start stays gentle
+    local budget = state.purpose == "pass" and ReseatDecals.BUDGET_REQUEST_MS or ReseatDecals.BUDGET_RESTORE_MS
     if state.phase == "wait" then
         state.waited = state.waited + dt / 1000
         if state.waited >= ReseatDecals.START_DELAY_S then
@@ -357,7 +380,7 @@ function ReseatDecals.update(dt)
                 end
             end
             state.indexed = true
-            say("puddles: %d found in %.0f ms of slices, %d put back from %s", #state.pieces, now() - state.startedAt, restored, ReseatDecals.FILE)
+            say("puddles: %d found among %d nodes walked in %.0f ms, %d put back from %s", #state.pieces, state.visited or 0, now() - state.startedAt, restored, ReseatDecals.FILE)
             if state.purpose == "pass" then
                 state.phase = "measure"
                 state.cursor = 1
@@ -366,7 +389,7 @@ function ReseatDecals.update(dt)
             end
         end
     elseif state.phase == "measure" then
-        if measure(state, budget) then
+        if measure(state, state.purpose == "pass" and math.huge or budget) then
             state.offset = ReseatDecals.median(state.devs) or 0
             local beyond = 0
             for _, d in ipairs(state.devs) do
@@ -383,14 +406,12 @@ function ReseatDecals.update(dt)
             state.phase = "sweep"
             state.cursor = 1
             state.moved = 0
+            if state.purpose == "pass" then
+                doSweep(state, math.huge)
+            end
         end
     elseif state.phase == "sweep" then
-        if sweep(state, budget) then
-            say("puddles: %d moved back to the ground (%d in all)", state.moved, state.movedTotal)
-            state.last = { found = #state.pieces, moved = state.moved, offset = state.offset }
-            state.moved = 0
-            state.phase = "idle"
-        end
+        doSweep(state, budget)
     elseif state.phase == "idle" then
         if state.wantPass then
             state.wantPass = false
@@ -406,13 +427,26 @@ function ReseatDecals.update(dt)
     end
 end
 
--- the button, as a tab of WAILA's debug hub (WAILA may load after this mod: tried every frame until it is there)
+-- the button, as a row of the Terrain tab of WAILA's debug hub (Waila.addDebugAction; an older WAILA without it gets a tab of its own); WAILA may load after this mod: tried every frame until it is there,
+-- and again if WAILA is reloaded (its Terrain tab's list is then a new table)
 function ReseatDecals.registerTab()
     local waila = g_currentMission ~= nil and g_currentMission.waila or nil
     if waila == nil or waila.registerDebugTab == nil then
         return
     end
+    local function run() print(string.format("[RandomFixes] %s", ReseatDecals.requestPass())) end
+    if waila.addDebugAction ~= nil and waila.addDebugAction("terrain", {
+        key = "randomfixes.reseat",
+        getLabel = function() return "Reseat the map's puddles on the ground (" .. ReseatDecals.status() .. ")" end,
+        instant = true,
+        run = run,
+    }) then
+        ReseatDecals.tabDone = true
+        ReseatDecals.addedTo = waila.actionEntries ~= nil and waila.actionEntries.terrain or nil
+        return
+    end
     ReseatDecals.tabDone = true
+    ReseatDecals.addedTo = nil
     if waila.unregisterDebugTab ~= nil then
         waila.unregisterDebugTab("randomfixes")
     end
@@ -422,7 +456,7 @@ function ReseatDecals.registerTab()
         getItems = function() return { { wailaID = "puddles", name = "Map puddles" } } end,
         describeItem = function(item) return item.name, ReseatDecals.status() end,
         getButtons = function(item)
-            return { { label = "Reseat now", callback = function() say("%s", ReseatDecals.requestPass()) end } }
+            return { { label = "Reseat now", callback = run } }
         end,
     })
 end
