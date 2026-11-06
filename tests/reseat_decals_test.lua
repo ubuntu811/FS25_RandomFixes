@@ -225,10 +225,11 @@ g_currentMission.waila = wailaWith()
 run(1)
 check("WAILA reloaded (a new list): the row is added again", #terrainRows == 1)
 
--- a WAILA with scan hooks: the layer scan starts the pass for the area it covers (nil: the whole map); no row, no tab
+-- a WAILA with scan hooks and addDebugAction: the layer scan starts the pass for its area, and a row of the Terrain tab does the whole map; no tab of its own
 registered = {}
 local hooks = {}
-g_currentMission.waila = { registerDebugTab = function(d) registered[#registered + 1] = d end, registerScanHook = function(id, fn) hooks[id] = fn; return true end, addDebugAction = function() error("not used when the scan hook is there") end }
+local rows = {}
+g_currentMission.waila = { registerDebugTab = function(d) registered[#registered + 1] = d end, registerScanHook = function(id, fn) hooks[id] = fn; return true end, actionEntries = { terrain = rows }, addDebugAction = function(id, entry) table.insert(rows, entry); return true end }
 terrainAt = base
 for _, id in ipairs(puddles) do nodes[id].y = before[id] end
 XMLFile = nil                                         -- (no saved moves for this one)
@@ -252,7 +253,7 @@ local ownPost = newNode("leitpfosten", group, 108, ground(108, 3) + 0.4, 3, fals
 local ownPart = newNode("leitpfosten_part", ownPost, 0, 0, 0, true)
 structures[#structures + 1] = { minX = 107.5, maxX = 108.5, y = ground(108, 3) + 0.4 - 0.02, node = ownPart }
 run(2)
-check("the scan hook is registered, nothing else", hooks["randomfixes.reseat"] ~= nil and #registered == 0)
+check("the scan hook and the Terrain row are registered, no tab of its own", hooks["randomfixes.reseat"] ~= nil and #rows == 1 and #registered == 0)
 terrainAt = function(x, z) return base(x, z) - ((x >= 20 and x < 40 or x >= 60 and x < 80) and 0.5 or 0) end       -- two stretches of the road lowered by 50 cm (a minority: the median stays the untouched offset)
 hooks["randomfixes.reseat"]({ minX = 20, maxX = 40, minZ = -10, maxZ = 10 })       -- an area rescan over the first stretch
 run(ReseatDecals.START_DELAY_S + 10)

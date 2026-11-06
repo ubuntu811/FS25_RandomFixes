@@ -554,7 +554,7 @@ function ReseatDecals.update(dt)
     end
 end
 
--- the trigger: WAILA's layer scan (Waila.registerScanHook: called when a whole-map or area scan starts); an older WAILA gets a row of its Terrain tab (Waila.addDebugAction) or a tab of its own; WAILA may load after this mod: tried every frame until it is there,
+-- the triggers: WAILA's layer scan (Waila.registerScanHook: called when a whole-map or area scan starts) and a row of its Terrain tab (Waila.addDebugAction); a WAILA with neither gets a tab of its own; WAILA may load after this mod: tried every frame until it is there,
 -- and again if WAILA is reloaded (its Terrain tab's list is then a new table)
 function ReseatDecals.registerTab()
     local waila = g_currentMission ~= nil and g_currentMission.waila or nil
@@ -562,20 +562,24 @@ function ReseatDecals.registerTab()
         return
     end
     local function run() print(string.format("[RandomFixes] %s", ReseatDecals.requestPass())) end
-    -- the layer scan (the whole map or "rescan around me") starts the pass for the area it covers: no row, no tab
-    if waila.registerScanHook ~= nil and waila.registerScanHook("randomfixes.reseat", function(rect) print(string.format("[RandomFixes] %s", ReseatDecals.requestPass(rect))) end) then
-        ReseatDecals.tabDone = true
-        ReseatDecals.addedTo = nil
-        return
+    -- the layer scan (the whole map or "rescan around me") starts the pass for the area it covers ...
+    if waila.registerScanHook ~= nil then
+        waila.registerScanHook("randomfixes.reseat", function(rect) print(string.format("[RandomFixes] %s", ReseatDecals.requestPass(rect))) end)
     end
+    -- ... and a row of the Terrain tab does it for the whole map on its own, without the layer scan
     if waila.addDebugAction ~= nil and waila.addDebugAction("terrain", {
         key = "randomfixes.reseat",
-        getLabel = function() return "Reseat the map's puddles on the ground (" .. ReseatDecals.status() .. ")" end,
+        getLabel = function() return "Reseat the map's puddles and guide posts on the ground (" .. ReseatDecals.status() .. ")" end,
         instant = true,
         run = run,
     }) then
         ReseatDecals.tabDone = true
         ReseatDecals.addedTo = waila.actionEntries ~= nil and waila.actionEntries.terrain or nil
+        return
+    end
+    if waila.registerScanHook ~= nil then
+        ReseatDecals.tabDone = true
+        ReseatDecals.addedTo = nil
         return
     end
     ReseatDecals.tabDone = true
