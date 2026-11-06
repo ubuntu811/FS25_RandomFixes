@@ -436,13 +436,30 @@ function ReseatDecals.status()
     if state == nil then
         return "not started"
     end
-    if state.phase == "collect" or state.phase == "measure" or state.phase == "sweep" then
-        return "running: " .. state.phase
+    if state.wantPass then
+        return "starting ..."
+    end
+    if state.phase == "collect" then
+        return "running: finding the puddles and posts"
+    elseif state.phase == "measure" or state.phase == "sweep" then
+        return "running: moving them"
     end
     if state.last ~= nil then
-        return string.format("last pass: %d puddles, %d moved (%d in all), %.1f cm over the ground", state.last.found, state.last.moved, state.movedTotal, state.last.offset * 100)
+        return string.format("done: %d pieces, %d moved (%d in all)", state.last.found, state.last.moved, state.movedTotal)
     end
-    return state.indexed and "found " .. #state.pieces .. " puddles, no pass yet" or "no pass yet this session"
+    return "no pass yet this session"
+end
+
+-- a row of WAILA's hub shows the status: when it changes by itself (the pass finishes some frames after the click) the hub is told to reload its rows
+local function refreshHub()
+    local waila = g_currentMission ~= nil and g_currentMission.waila or nil
+    if waila == nil then
+        return
+    end
+    local refresh = waila.refreshDebugHubKeepSelection or waila.refreshDebugHub
+    if refresh ~= nil then
+        pcall(refresh)
+    end
 end
 
 local function doSweep(state, budget)
@@ -452,6 +469,7 @@ local function doSweep(state, budget)
         state.last = { found = #state.pieces, moved = state.moved, offset = state.offset }
         state.moved = 0
         state.phase = "idle"
+        refreshHub()
     end
 end
 
@@ -549,6 +567,7 @@ function ReseatDecals.update(dt)
                 state.devs = {}
             else
                 startCollect(state, "pass")
+                refreshHub()
             end
         end
     end

@@ -54,7 +54,8 @@ local clock = 0
 getTimeSec = function() clock = clock + 0.00002; return clock end          -- every call costs 0.02 ms: the slices are cut by the budget
 FSBaseMission = { update = function() end }
 local registered = {}
-g_currentMission.waila = { registerDebugTab = function(d) registered[#registered + 1] = d end, unregisterDebugTab = function(id) for i = #registered, 1, -1 do if registered[i].id == id then table.remove(registered, i) end end end }
+local refreshes = 0
+g_currentMission.waila = { refreshDebugHubKeepSelection = function() refreshes = refreshes + 1 end, registerDebugTab = function(d) registered[#registered + 1] = d end, unregisterDebugTab = function(id) for i = #registered, 1, -1 do if registered[i].id == id then table.remove(registered, i) end end end }
 local commands = {}
 addConsoleCommand = function(name, _, fn, target) commands[name] = { fn = fn, target = target } end
 dofile("scripts/ReseatDecals.lua")
@@ -110,7 +111,9 @@ check("no background work: two minutes on, nothing was looked at or moved", stil
 local buttons = tab.getButtons(item)
 check("one button, Reseat now", #buttons == 1 and buttons[1].label == "Reseat now")
 buttons[1].callback(item)
+check("right after the click the row says it is starting", select(2, tab.describeItem(item)):find("starting", 1, true) ~= nil)
 ReseatDecals.update(16)
+check("then that it is running", select(2, tab.describeItem(item)):find("running", 1, true) ~= nil and refreshes >= 1)
 check("a second press while it runs is refused", ReseatDecals.requestPass() == "a pass is running")
 run(10)
 -- (the puddles at 40 and 80 have half of their ring over the edge of the cut: only the ones clear of it are exact)
@@ -128,6 +131,8 @@ check("found only the map's puddles, 100 (the one among the placeables is not lo
 check("the 39 puddles clear of the lowered stretch's edges sit at their ground + 2 cm again", exact == 39 and wrong == 0)
 check("the puddles outside the cut did not move", untouched == 40 + 20 - 1 - 1 + 0 or untouched > 0)
 check("the sign decal and the road piece were not touched", nodes[sign].y == 101 and nodes[other].y == ground(5, 0))
+check("the hub was told to reload its rows when the pass finished", refreshes >= 2)
+check("the row says done, with what happened", select(2, tab.describeItem(item)):find("done:", 1, true) ~= nil)
 check("the row says what happened", st.last ~= nil and st.last.moved >= 39 and select(2, tab.describeItem(item)):find("moved", 1, true) ~= nil)
 check("it rests: nothing is running", st.phase == "idle")
 
