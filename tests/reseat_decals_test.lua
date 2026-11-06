@@ -40,10 +40,10 @@ getTerrainHeightAtWorldPos = function(_, x, _, z) return terrainAt(x, z) end
 local clock = 0
 getTimeSec = function() clock = clock + 0.00002; return clock end          -- every call costs 0.02 ms: the slices are cut by the budget
 FSBaseMission = { update = function() end }
-local queued = 0
-g_terrainDeformationQueue = { queueJob = function() queued = queued + 1 end }
-local applied = 0
-TerrainDeformation = { apply = function() applied = applied + 1 end }
+local registered = {}
+g_currentMission.waila = { registerDebugTab = function(d) registered[#registered + 1] = d end, unregisterDebugTab = function(id) for i = #registered, 1, -1 do if registered[i].id == id then table.remove(registered, i) end end end }
+local commands = {}
+addConsoleCommand = function(name, _, fn, target) commands[name] = { fn = fn, target = target } end
 dofile("scripts/ReseatDecals.lua")
 
 check("names: puddles match, road pieces and sign decals do not", ReseatDecals.matches("roadPuddlePiece") and ReseatDecals.matches("intersectionPuddles") and not ReseatDecals.matches("roadPiece") and not ReseatDecals.matches("trafficSignDecal_vis"))
@@ -53,48 +53,55 @@ check("shift: within the tolerance nothing, beyond it the difference", ReseatDec
 local function run(seconds)
     for _ = 1, seconds * 60 do ReseatDecals.update(16) end
 end
-run(ReseatDecals.START_DELAY_S + 30)
+run(ReseatDecals.START_DELAY_S + 5)
 local st = ReseatDecals.state
-check("found only the puddles, 100", #st.pieces == 100)
-check("the offset is the untouched 2 cm", st.offset ~= nil and math.abs(st.offset - 0.02) < 1e-6)
-check("nothing moved while the ground is as it was", st.movedTotal == 0)
+check("nothing saved, nothing asked: it did not even index the scene", st.phase == "idle" and not st.indexed and #st.pieces == 0)
+check("the hub tab is there, with the console command", #registered == 1 and registered[1].id == "randomfixes" and commands.reseatDecals ~= nil)
+local tab = registered[1]
+local item = tab.getItems()[1]
+local primary, secondary = tab.describeItem(item)
+check("the row says what the puddles are and that nothing ran yet", primary == "Map puddles" and secondary:find("no pass yet", 1, true) ~= nil)
 
--- someone lowers the road between x = 50 and 60 by 40 cm: nothing runs until an edit is seen
+-- someone lowers the road between x = 50 and 60 by 40 cm: nothing happens until the button
 local before = {}
 for _, id in ipairs(puddles) do before[id] = nodes[id].y end
 local base = ground
-terrainAt = function(x, z) return base(x, z) + ((x >= 50 and x < 60) and -0.4 or 0) end
-run(60)
+local function world(raise) return function(x, z) return base(x, z) + ((x >= 50 and x < 60) and -0.4 or 0) + (raise and (x >= 10 and x < 15) and 0.3 or 0) end end
+terrainAt = world(false)
+run(120)
 local still = 0
 for _, id in ipairs(puddles) do if nodes[id].y == before[id] then still = still + 1 end end
-check("no polling: without an edit event nothing is looked at, a minute on", still == 100 and st.phase == "idle")
-check("both hooks took", ReseatDecals.hookCount == 2)
-g_terrainDeformationQueue:queueJob()
-check("the wrapped queueJob still calls the original", queued == 1)
-run(ReseatDecals.SETTLE_S + 1)
+check("no background work: two minutes on, nothing was looked at or moved", still == 100 and not st.indexed)
+
+local buttons = tab.getButtons(item)
+check("one button, Reseat now", #buttons == 1 and buttons[1].label == "Reseat now")
+buttons[1].callback(item)
+ReseatDecals.update(16)
+check("a second press while it runs is refused", ReseatDecals.requestPass() == "a pass is running")
+run(10)
 local moved, wrong = 0, 0
 for _, id in ipairs(puddles) do
-    local x = nodes[id].x
-    local want = terrainAt(x, 0) + 0.02
+    local want = terrainAt(nodes[id].x, 0) + 0.02
     if math.abs(nodes[id].y - want) > 1e-6 then wrong = wrong + 1 end
     if math.abs(nodes[id].y - before[id]) > 0.3 then moved = moved + 1 end
 end
+check("found only the puddles, 100, and the offset is the untouched 2 cm", #st.pieces == 100 and math.abs(st.offset - 0.02) < 1e-6)
 check("the ten puddles over the lowered stretch moved down by 40 cm", moved == 10)
 check("every puddle sits at its ground + 2 cm again, none of the others moved", wrong == 0)
 check("the sign decal and the road piece were not touched", nodes[sign].y == 101 and nodes[other].y == ground(5, 0))
-check("the first pass is done and a second one is booked for a little later", st.due ~= nil)
-run(ReseatDecals.LATE_S + 2)
-check("after the second pass it rests again: nothing booked", st.phase == "idle" and st.due == nil)
-check("it said what it did", #log > 0 and (function() for _, l in ipairs(log) do if l:find("moved back", 1, true) then return true end end end)())
+check("the row says what happened", select(2, tab.describeItem(item)):find("10 moved", 1, true) ~= nil)
+check("it rests: nothing is running", st.phase == "idle")
 
--- raised ground buries them: moved up
-terrainAt = function(x, z) return base(x, z) + ((x >= 50 and x < 60) and -0.4 or 0) + ((x >= 10 and x < 15) and 0.3 or 0) end
-TerrainDeformation.apply()
-run(ReseatDecals.SETTLE_S + ReseatDecals.LATE_S + 3)
+-- raised ground buries puddles: the button again, no new indexing
+local pieces = st.pieces
+terrainAt = world(true)
+commands.reseatDecals.target[commands.reseatDecals.fn](commands.reseatDecals.target)
+run(10)
 local up = 0
 for _, id in ipairs(puddles) do if nodes[id].x >= 10 and nodes[id].x < 15 and math.abs(nodes[id].y - (terrainAt(nodes[id].x, 0) + 0.02)) < 1e-6 then up = up + 1 end end
-check("raised ground lifts its puddles too", up == 5)
--- saving: the moved puddles go to the savegame's file and are put back at the next load, before anything is measured
+check("raised ground lifts its puddles too (the console command does the same as the button)", up == 5 and st.pieces == pieces)
+
+-- saving: the moved puddles go to the savegame's file and are put back at the next load, with no pass
 local files = {}
 local function fakeXml(path)
     local x = { data = files[path] or {}, path = path }
@@ -111,39 +118,33 @@ XMLFile = { create = function(_, path) files[path] = nil; return fakeXml(path) e
 g_currentMission.missionInfo = { savegameDirectory = "save1" }
 ReseatDecals.save()
 local saved = files["save1/reseatDecals.xml"]
-local down, up = 0, 0
+local down, upn = 0, 0
 for k, v in pairs(saved) do
     if k:find("#shift", 1, true) then
-        if math.abs(v + 0.4) < 1e-6 then down = down + 1 elseif math.abs(v - 0.3) < 1e-6 then up = up + 1 end
+        if math.abs(v + 0.4) < 1e-6 then down = down + 1 elseif math.abs(v - 0.3) < 1e-6 then upn = upn + 1 end
     end
 end
-check("the moved puddles are in the file: ten 40 cm down, five 30 cm up", down == 10 and up == 5)
+check("the moved puddles are in the file: ten 40 cm down, five 30 cm up", down == 10 and upn == 5)
 check("records: untouched ones are not written, unmatched file entries are kept", #ReseatDecals.records({ { key = "a", shift = 0 }, { key = "b", shift = 0.5 } }, { c = 0.1 }) == 2)
 
--- the next session: the nodes are back at the map's heights, the terrain is still lowered
-for _, id in ipairs(puddles) do nodes[id].y = before[id] end
-terrainAt = function(x, z) return base(x, z) + ((x >= 50 and x < 60) and -0.4 or 0) + ((x >= 10 and x < 15) and 0.3 or 0) end
+for _, id in ipairs(puddles) do nodes[id].y = before[id] end            -- the next session: the nodes are back at the map's heights, the terrain is still changed
+registered = {}
 dofile("scripts/ReseatDecals.lua")
-local restoredLog
-local oldPrint = print
-print = function(text) if tostring(text):find("put back", 1, true) then restoredLog = text end end
-run(ReseatDecals.START_DELAY_S + 2)
-print = oldPrint
+run(ReseatDecals.START_DELAY_S + 3)
 local back = 0
 for _, id in ipairs(puddles) do if math.abs(nodes[id].y - (terrainAt(nodes[id].x, 0) + 0.02)) < 1e-6 then back = back + 1 end end
-check("all 100 sit on the lowered ground right after the load", back == 100)
-check("it put the fifteen back from the file, not by sweeping", restoredLog ~= nil and restoredLog:find("15 put back", 1, true) ~= nil and ReseatDecals.state.movedTotal == 0)
+check("all 100 sit on the changed ground right after the load, without a pass", back == 100 and ReseatDecals.state.movedTotal == 0 and ReseatDecals.state.last == nil)
+check("the tab is registered again in the new session", #registered == 1)
 
--- no hooks possible: a slow pass every FALLBACK_S instead
-g_terrainDeformationQueue, TerrainDeformation = nil, nil
+-- no waila yet: the tab is tried again until it is there
+registered = {}
+g_currentMission.waila = nil
 dofile("scripts/ReseatDecals.lua")
-ReseatDecals.FALLBACK_S = 30
-terrainAt = base
-run(ReseatDecals.START_DELAY_S + 10)
-check("without hooks it says so and keeps a fallback", ReseatDecals.hookCount == 0 and ReseatDecals.state.due ~= nil)
-terrainAt = function(x, z) return base(x, z) - 0.5 end
-run(40)
-check("the fallback pass moves them", math.abs(nodes[puddles[1]].y - (terrainAt(nodes[puddles[1]].x, 0) + ReseatDecals.state.offset)) < 1e-6)
+run(2)
+check("without WAILA nothing is registered and nothing breaks", #registered == 0 and not ReseatDecals.tabDone)
+g_currentMission.waila = { registerDebugTab = function(d) registered[#registered + 1] = d end }
+run(1)
+check("when WAILA appears the tab follows", #registered == 1 and ReseatDecals.tabDone)
 print = realPrint
 realPrint(string.format("reseat_decals_test: %d/%d passed", passed, passed + failed))
 os.exit(failed == 0 and 0 or 1)
