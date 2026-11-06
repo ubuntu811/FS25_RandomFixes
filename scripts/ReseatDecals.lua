@@ -15,7 +15,7 @@
 
     The log says how many were found, the offset, how far off the pieces are (percentiles) and how many were moved ("[RandomFixes] puddles: ...").
 ]]
-ReseatDecals = { PATTERNS = { "puddle" }, POST_NAMES = { "leitpfosten" }, TOLERANCE = 0.06, BUDGET_REQUEST_MS = 8, BUDGET_RESTORE_MS = 1.5, START_DELAY_S = 3, MAX_NODES_PER_SLICE = 4000, FILE = "reseatDecals.xml", MIN_SAVED_M = 0.01, RING_SAMPLES = 8, RING_PART = 0.9, MAX_RING_M = 3, MAX_SHIFT_M = 3, LIFT_M = 0.015 }
+ReseatDecals = { PATTERNS = { "puddle" }, POST_NAMES = { "leitpfosten" }, TOLERANCE = 0.06, BUDGET_REQUEST_MS = 8, BUDGET_RESTORE_MS = 1.5, START_DELAY_S = 3, MAX_NODES_PER_SLICE = 4000, FILE = "reseatDecals.xml", MIN_SAVED_M = 0.01, RING_SAMPLES = 8, RING_PART = 0.9, MAX_RING_M = 3, MAX_SHIFT_M = 6, LIFT_M = 0.015, RAY_UP_M = 0.3, RAY_LEN_M = 0.7, POST_SIDE_M = 0.3 }
 
 local function say(format, ...)
     print(string.format("[RandomFixes] " .. format, ...))
@@ -223,6 +223,57 @@ function ReseatDecals.waterLevel(ringHeights, ringRadius)
     return math.min(level, a), a
 end
 
+-- Does the piece rest on a structure (a bridge deck, a slab, a placeable)? A ray straight down from just above it, against static objects, buildings and road colliders (not the terrain), hits something. A puddle has
+-- no collision of its own, so its own spot is cast; a post has (its parts are ignored), so four spots 30 cm to its sides are. Only asked for pieces that are about to move.
+local function structureMask()
+    local mask = 0
+    for _, name in ipairs({ "STATIC_OBJECT", "BUILDING", "ROAD" }) do
+        if CollisionFlag ~= nil and CollisionFlag[name] ~= nil then
+            mask = mask + CollisionFlag[name]
+        end
+    end
+    return mask
+end
+
+local function insideNode(hit, root)
+    local node, depth = hit, 0
+    while node ~= nil and node ~= 0 and depth < 10 do
+        if node == root then
+            return true
+        end
+        node = getParent(node)
+        depth = depth + 1
+    end
+    return false
+end
+
+function ReseatDecals.restsOnStructure(piece, y)
+    if raycastClosest == nil then
+        return false
+    end
+    local mask = structureMask()
+    if mask == 0 then
+        return false
+    end
+    local hitNode
+    local target = { onHit = function(_, nodeId) hitNode = nodeId; return false end }
+    local spots
+    if piece.class == "posts" then
+        local d = ReseatDecals.POST_SIDE_M
+        spots = { { piece.cx + d, piece.cz }, { piece.cx - d, piece.cz }, { piece.cx, piece.cz + d }, { piece.cx, piece.cz - d } }
+    else
+        spots = { { piece.cx, piece.cz } }
+    end
+    for _, spot in ipairs(spots) do
+        hitNode = nil
+        raycastClosest(spot[1], y + ReseatDecals.RAY_UP_M, spot[2], 0, -1, 0, ReseatDecals.RAY_LEN_M, "onHit", target, mask)
+        if hitNode ~= nil and not insideNode(hitNode, piece.node) then
+            return true
+        end
+    end
+    return false
+end
+
 local function now() return getTimeSec() * 1000 end
 
 -- phase 1: the scene walked in slices; every matching shape is remembered
@@ -314,6 +365,9 @@ local function sweep(state, budgetMs)
             delta, far = ReseatDecals.shiftFor(y, ground, state.offsets[piece.class] or 0, ReseatDecals.TOLERANCE, ReseatDecals.liftOf(piece.class))
             if far then
                 state.farOff = (state.farOff or 0) + 1
+            elseif delta ~= nil and ReseatDecals.restsOnStructure(piece, y) then
+                delta = nil
+                state.onStructure = (state.onStructure or 0) + 1
             end
         end
         if delta ~= nil then
@@ -385,8 +439,8 @@ end
 
 local function doSweep(state, budget)
     if sweep(state, budget) then
-        say("%d moved back to the ground (%d in all), %d left alone for being over %.0f m off (bridges, ramps, tunnels)", state.moved, state.movedTotal, state.farOff or 0, ReseatDecals.MAX_SHIFT_M)
-        state.farOff = 0
+        say("%d moved back to the ground (%d in all); left alone: %d resting on a structure (a ray down hit a bridge, a slab, a building), %d more than %.0f m off", state.moved, state.movedTotal, state.onStructure or 0, state.farOff or 0, ReseatDecals.MAX_SHIFT_M)
+        state.onStructure, state.farOff = 0, 0
         state.last = { found = #state.pieces, moved = state.moved, offset = state.offset }
         state.moved = 0
         state.phase = "idle"

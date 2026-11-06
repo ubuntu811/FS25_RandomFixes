@@ -42,6 +42,14 @@ getShapeWorldBoundingSphere = function(n) return nodes[n].x, nodes[n].y, nodes[n
 getWorldTranslation = function(n) return nodes[n].x, nodes[n].y, nodes[n].z end
 setWorldTranslation = function(n, x, y, z) nodes[n].x, nodes[n].y, nodes[n].z = x, y, z end
 getTerrainHeightAtWorldPos = function(_, x, _, z) return terrainAt(x, z) end
+local structures = {}                                  -- decks: { minX, maxX, y, node }
+CollisionFlag = { STATIC_OBJECT = 2, BUILDING = 4096, ROAD = 8192 }
+raycastClosest = function(x, y, z, nx, ny, nz, len, cb, target, mask)
+    for _, d in ipairs(structures) do
+        if x >= d.minX and x <= d.maxX and d.y <= y and d.y >= y - len then target[cb](target, d.node, x, d.y, z, y - d.y, 0, 1, 0, 0, 0, true); return 1 end
+    end
+    return 0
+end
 local clock = 0
 getTimeSec = function() clock = clock + 0.00002; return clock end          -- every call costs 0.02 ms: the slices are cut by the budget
 FSBaseMission = { update = function() end }
@@ -227,12 +235,22 @@ XMLFile = nil                                         -- (no saved moves for thi
 dofile("scripts/ReseatDecals.lua")
 ReseatDecals.LIFT_M = 0
 local bridge = newNode("roadPuddlePiece", group, 90, ground(90, 0) + 9, 0, true)        -- on a bridge: the ground is 9 m below
+local bridge4 = newNode("roadPuddlePiece", group, 94, ground(94, 0) + 4, 0, true)       -- on a low bridge: 4 m, under the 6 m cap: only the ray tells
+local deckNode = newNode("deck", top)
+structures[1] = { minX = 93, maxX = 96, y = ground(94, 0) + 4 - 0.02, node = deckNode }
+local floating = newNode("roadPuddlePiece", group, 97.5, ground(97.5, 0) + 4, 0, true)       -- 4 m up with nothing under it: a deep cut, not a bridge
 local posts, farPost = {}, nil
 for x = 1, 99 do
     if x <= 19 or (x >= 61 and x <= 79) or x >= 81 then posts[#posts + 1] = newNode("leitpfosten", group, x, ground(x, 3), 3, false) end      -- guide posts: a group whose origin is its foot
 end
 newNode("leitpfosten_r", posts[1], 0, 0, 0, true)                                -- a part of a post: not looked at
-farPost = newNode("leitpfosten", group, 100, ground(100, 3) + 5, 3, false)            -- on a bridge too
+farPost = newNode("leitpfosten", group, 100, ground(100, 3) + 5, 3, false)            -- on a bridge too: 5 m up, a deck under it
+structures[#structures + 1] = { minX = 99, maxX = 101, y = ground(100, 3) + 5 - 0.02, node = deckNode }
+local onDeck = newNode("leitpfosten", group, 105, ground(105, 3) + 4, 3, false)         -- on a deck 4 m up
+structures[#structures + 1] = { minX = 104, maxX = 106, y = ground(105, 3) + 4 - 0.02, node = deckNode }
+local ownPost = newNode("leitpfosten", group, 108, ground(108, 3) + 0.4, 3, false)      -- 40 cm over the ground, with a collision part of its own that the side rays would hit
+local ownPart = newNode("leitpfosten_part", ownPost, 0, 0, 0, true)
+structures[#structures + 1] = { minX = 107.5, maxX = 108.5, y = ground(108, 3) + 0.4 - 0.02, node = ownPart }
 run(2)
 check("the scan hook is registered, nothing else", hooks["randomfixes.reseat"] ~= nil and #registered == 0)
 terrainAt = function(x, z) return base(x, z) - ((x >= 20 and x < 40 or x >= 60 and x < 80) and 0.5 or 0) end       -- two stretches of the road lowered by 50 cm (a minority: the median stays the untouched offset)
@@ -259,8 +277,12 @@ for _, id in ipairs(posts) do
     if (x <= 19 or x >= 81) and nodes[id].y == ground(x, 3) then postsStill = postsStill + 1 end
 end
 check("the guide posts over the lowered stretch stand on the lowered ground again, the others did not move", postsDown == 19 and postsStill == 38)
-check("a guide post on a bridge (5 m over the ground) is left alone", nodes[farPost].y == ground(100, 3) + 5)
-check("a puddle 9 m over the ground (a bridge) is left alone", nodes[bridge].y == ground(90, 0) + 9)
+check("a guide post on a bridge (5 m over the ground, a deck under it) is left alone", nodes[farPost].y == ground(100, 3) + 5)
+check("a guide post on a deck 4 m up is left alone", nodes[onDeck].y == ground(105, 3) + 4)
+check("a ray that hits a post's own part does not count as a structure: that post is moved down", math.abs(nodes[ownPost].y - ground(108, 3)) < 1e-6)
+check("a puddle 9 m over the ground (a bridge) is left alone (the cap)", nodes[bridge].y == ground(90, 0) + 9)
+check("a puddle on a deck 4 m up is left alone: the ray down hits the deck", nodes[bridge4].y == ground(94, 0) + 4)
+check("a puddle 4 m up with nothing under it is moved down (a deep cut)", math.abs(nodes[floating].y - (ground(97.5, 0) + 0.02)) < 0.05)
 check("shiftFor: beyond MAX_SHIFT_M it says so and does not move", select(2, ReseatDecals.shiftFor(20, 10, 0.02, 0.06)) == true and ReseatDecals.shiftFor(20, 10, 0.02, 0.06) == nil)
 ReseatDecals.LIFT_M = 0.015
 check("a moved puddle gets the lift on top", math.abs(ReseatDecals.shiftFor(9.6, 10, 0.02, 0.06) - (0.42 + 0.015)) < 1e-9)
