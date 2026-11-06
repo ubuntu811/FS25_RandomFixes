@@ -87,6 +87,17 @@ check("half of the border over a lowered stretch: the level lies down towards th
 level = ReseatDecals.waterLevel(ring(lowAt(flat, 0.9, 0, 0.3, -0.2), 0.9, 8), 0.9)
 check("a mound at the border does not raise the level", math.abs(level - 10) < 1e-9)
 
+-- few members: the median would be half way (a map with two posts, one of them 3 m in the air): the default is used
+local many = {}
+for i = 1, 25 do many[i] = 0.01 end
+local o1, d1 = ReseatDecals.offsetFor("posts", { 0, 3 })
+local o2, d2 = ReseatDecals.offsetFor("puddles", { 5 })
+local o3, d3 = ReseatDecals.offsetFor("posts", many)
+check("two posts, one 3 m up: not the median but the default offset of a post (its foot on the ground)", o1 == 0 and d1 == true)
+check("one puddle: the default puddle offset", o2 == ReseatDecals.DEFAULT_OFFSET.puddles and d2 == true)
+check("enough members: the median", math.abs(o3 - 0.01) < 1e-12 and d3 == false)
+check("with the default the floating one of the two comes down and the good one stays", math.abs(ReseatDecals.shiftFor(103 + 0, 100, o1, 0.06, 0) + 3) < 1e-9 and ReseatDecals.shiftFor(100, 100, o1, 0.06, 0) == nil)
+
 local function run(seconds)
     for _ = 1, seconds * 60 do ReseatDecals.update(16) end
 end

@@ -15,7 +15,7 @@
 
     The log says how many were found, the offset, how far off the pieces are (percentiles) and how many were moved ("[RandomFixes] puddles: ...").
 ]]
-ReseatDecals = { PATTERNS = { "puddle" }, POST_NAMES = { "leitpfosten_r", "leitpfosten_l" }, POST_MAX_SHARE = nil, POST_MAX_MIN = 8, TOLERANCE = 0.06, BUDGET_REQUEST_MS = 8, BUDGET_RESTORE_MS = 1.5, START_DELAY_S = 3, MAX_NODES_PER_SLICE = 4000, FILE = "reseatDecals.xml", MIN_SAVED_M = 0.01, RING_SAMPLES = 8, RING_PART = 0.9, MAX_RING_M = 3, MAX_SHIFT_M = 6, LIFT_M = 0.015, RAY_UP_M = 0.3, RAY_LEN_M = 0.7, POST_SIDE_M = 0.3 }
+ReseatDecals = { PATTERNS = { "puddle" }, POST_NAMES = { "leitpfosten_r", "leitpfosten_l" }, POST_MAX_SHARE = nil, POST_MAX_MIN = 8, MIN_MEMBERS = 20, DEFAULT_OFFSET = { puddles = 0.002, posts = 0 }, TOLERANCE = 0.06, BUDGET_REQUEST_MS = 8, BUDGET_RESTORE_MS = 1.5, START_DELAY_S = 3, MAX_NODES_PER_SLICE = 4000, FILE = "reseatDecals.xml", MIN_SAVED_M = 0.01, RING_SAMPLES = 8, RING_PART = 0.9, MAX_RING_M = 3, MAX_SHIFT_M = 6, LIFT_M = 0.015, RAY_UP_M = 0.3, RAY_LEN_M = 0.7, POST_SIDE_M = 0.3 }
 
 local function say(format, ...)
     print(string.format("[RandomFixes] " .. format, ...))
@@ -52,6 +52,15 @@ function ReseatDecals.classOf(node, name)
         return "puddles"
     end
     return nil
+end
+
+-- The normal offset of a class over its level: the median of its members when there are enough of them (nearly all of them untouched), a fixed default when there are not (a map with two posts, one of them in the
+-- air: the median of two would be half way and move the good one too). Returns the offset and whether it is the default.
+function ReseatDecals.offsetFor(class, list)
+    if #list >= ReseatDecals.MIN_MEMBERS then
+        return ReseatDecals.median(list) or 0, false
+    end
+    return ReseatDecals.DEFAULT_OFFSET[class] or 0, true
 end
 
 function ReseatDecals.liftOf(class)
@@ -571,7 +580,7 @@ function ReseatDecals.update(dt)
             for _, c in ipairs(ReseatDecals.CLASS_LIST) do
                 local list = byClass[c]
                 if list ~= nil then
-                    local offset = ReseatDecals.median(list) or 0
+                    local offset, isDefault = ReseatDecals.offsetFor(c, list)
                     state.offsets[c] = offset
                     local beyond = 0
                     for _, d in ipairs(list) do
@@ -579,7 +588,7 @@ function ReseatDecals.update(dt)
                             beyond = beyond + 1
                         end
                     end
-                    say("%s: %.1f cm over the ground at the median; deviation p50 %.1f / p90 %.1f / p99 %.1f cm; %d of %d are beyond the %.0f cm tolerance (they are moved)", c, offset * 100,
+                    say("%s: %.1f cm over the ground (%s); deviation p50 %.1f / p90 %.1f / p99 %.1f cm; %d of %d are beyond the %.0f cm tolerance (they are moved)", c, offset * 100, isDefault and string.format("the default: only %d of them, fewer than %d for a median", #list, ReseatDecals.MIN_MEMBERS) or "the median",
                         ReseatDecals.percentile(list, offset, 0.5) * 100, ReseatDecals.percentile(list, offset, 0.9) * 100, ReseatDecals.percentile(list, offset, 0.99) * 100,
                         beyond, #list, ReseatDecals.TOLERANCE * 100)
                 end
