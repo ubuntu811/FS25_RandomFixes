@@ -625,6 +625,91 @@ if addConsoleCommand ~= nil and not ReseatDecals.commandAdded then
     function ReseatDecals:consoleReseat() return ReseatDecals.requestPass() end
 end
 
+-- An experiment, one post at a time: reseatPostTest [dy] moves the guide post nearest to you (a "leitpfosten_r" / "leitpfosten_l": the node that carries the breakable joint, its own height) up by dy metres
+-- (default 0.3) with setWorldTranslation, and prints where the node and its collision body ("coli") were before and are after, and the body type. The posts are dynamic bodies on breakable joints: whether moving
+-- the node moves the body (and its collision) or only the picture is not known; look at it, and walk or drive into it. reseatPostTest 0 only prints. Nothing is saved.
+local function nearestPost(px, pz)
+    local best, bestD
+    local stack = { { node = searchRoot(), index = 0 } }
+    while #stack > 0 do
+        local top = stack[#stack]
+        if top.index == 0 then
+            local lower = string.lower(getName(top.node) or "")
+            if lower == "leitpfosten_r" or lower == "leitpfosten_l" then
+                local x, _, z = getWorldTranslation(top.node)
+                local d = (x - px) ^ 2 + (z - pz) ^ 2
+                if bestD == nil or d < bestD then
+                    best, bestD = top.node, d
+                end
+                top.count = 0
+            else
+                top.count = getNumOfChildren(top.node)
+            end
+        end
+        if top.index < top.count then
+            local child = getChildAt(top.node, top.index)
+            top.index = top.index + 1
+            stack[#stack + 1] = { node = child, index = 0 }
+        else
+            stack[#stack] = nil
+        end
+    end
+    return best, bestD and math.sqrt(bestD) or nil
+end
+
+function ReseatDecals.postTest(dy)
+    dy = tonumber(dy) or 0.3
+    local px, pz
+    if g_localPlayer ~= nil and g_localPlayer.rootNode ~= nil then
+        local x, _, z = getWorldTranslation(g_localPlayer.rootNode)
+        px, pz = x, z
+    elseif getCamera ~= nil then
+        local x, _, z = getWorldTranslation(getCamera())
+        px, pz = x, z
+    end
+    if px == nil then
+        return "no player"
+    end
+    local post, distance = nearestPost(px, pz)
+    if post == nil then
+        return "no guide post found"
+    end
+    local joint = getChild(post, "joint")
+    local coli = joint ~= nil and joint ~= 0 and getChild(joint, "coli") or nil
+    local function where(label)
+        local x, y, z = getWorldTranslation(post)
+        local line = string.format("%s: node %.3f %.3f %.3f", label, x, y, z)
+        if coli ~= nil and coli ~= 0 then
+            local cx, cy, cz = getWorldTranslation(coli)
+            line = line .. string.format(", coli %.3f %.3f %.3f", cx, cy, cz)
+            if getRigidBodyType ~= nil then
+                line = line .. ", body type " .. tostring(getRigidBodyType(coli))
+            end
+        else
+            line = line .. ", no coli found under joint"
+        end
+        return line
+    end
+    local before = where("before")
+    if dy ~= 0 then
+        local x, y, z = getWorldTranslation(post)
+        setWorldTranslation(post, x, y + dy, z)
+    end
+    local after = where("after")
+    local text = string.format("[RandomFixes] reseatPostTest: %s, %.1f m from you, moved %+.2f m\n  %s\n  %s", getName(post), distance, dy, before, after)
+    print(text)
+    return text
+end
+
+if addConsoleCommand ~= nil and not ReseatDecals.postTestAdded then
+    ReseatDecals.postTestAdded = true
+    addConsoleCommand("reseatPostTest", "reseatPostTest [dy]: experiment: move the guide post nearest to you up by dy metres (default 0.3) and print where its node and collision body end up", "consolePostTest", ReseatDecals)
+    function ReseatDecals:consolePostTest(dy)
+        local ok, result = pcall(ReseatDecals.postTest, dy)
+        return ok and result or ("failed: " .. tostring(result))
+    end
+end
+
 if FSCareerMissionInfo ~= nil and not ReseatDecals.saveHooked then
     ReseatDecals.saveHooked = true
     FSCareerMissionInfo.saveToXMLFile = Utils.appendedFunction(FSCareerMissionInfo.saveToXMLFile, function()
