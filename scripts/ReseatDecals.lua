@@ -452,6 +452,12 @@ function ReseatDecals.requestPass(rect)
     return rect == nil and "reseating the map puddles" or "reseating the map puddles in the scanned area"
 end
 
+-- for the hub's Run button: a pass that is asked for or running makes the row busy ("Running ..." instead of Run), so nobody starts it twice
+function ReseatDecals.isBusy()
+    local state = ReseatDecals.state
+    return state ~= nil and (state.wantPass == true or state.phase == "collect" or state.phase == "measure" or state.phase == "sweep")
+end
+
 function ReseatDecals.status()
     local state = ReseatDecals.state
     if state == nil then
@@ -639,6 +645,7 @@ function ReseatDecals.registerTab()
         key = "randomfixes.reseat",
         getLabel = function() return "Reseat the map's puddles and guide posts on the ground (" .. ReseatDecals.status() .. ")" end,
         instant = true,
+        isBusy = function() return ReseatDecals.isBusy() end,
         run = run,
     }) then
         ReseatDecals.tabDone = true
