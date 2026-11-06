@@ -59,6 +59,8 @@ g_currentMission.waila = { refreshDebugHubKeepSelection = function() refreshes =
 local commands = {}
 addConsoleCommand = function(name, _, fn, target) commands[name] = { fn = fn, target = target } end
 dofile("scripts/ReseatDecals.lua")
+check("no post class by default (the guide posts of the map must stay where they are)", #ReseatDecals.POST_NAMES == 0)
+ReseatDecals.POST_NAMES = { "leitpfosten" }               -- (the class itself is still tested)
 ReseatDecals.LIFT_M = 0                                -- (the old scenarios work with exact positions; the lift has its own test)
 
 check("names: puddles match, road pieces and sign decals do not", ReseatDecals.matches("roadPuddlePiece") and ReseatDecals.matches("intersectionPuddles") and not ReseatDecals.matches("roadPiece") and not ReseatDecals.matches("trafficSignDecal_vis"))
@@ -188,7 +190,7 @@ end
 local function savedHas(part) for _, v in pairs(saved) do if type(v) == "string" and v:find(part, 1, true) then return true end end return false end
 check("the moved puddles are in the file: the 39 clear of the edges 40 cm down and the 9 30 cm up (plus the ones at the edges of the cuts)", down >= 39 and upn >= 9)
 check("the ones that sank and came back up are not in it, the untouched neither", not savedHas("@35.00,0.00") and not savedHas("@37.00,0.00") and not savedHas("@30.00,0.00") and not savedHas("@5.00,0.00"))
-check("records: untouched ones are not written, unmatched file entries are kept", #ReseatDecals.records({ { key = "a", shift = 0 }, { key = "b", shift = 0.5 } }, { c = 0.1 }) == 2)
+check("records: untouched ones are not written, unmatched file entries are kept while the scene is not indexed, dropped once it is", #ReseatDecals.records({ { key = "a", shift = 0 }, { key = "b", shift = 0.5 } }, { c = 0.1 }) == 2 and #ReseatDecals.records({ { key = "a", shift = 0 }, { key = "b", shift = 0.5 } }, { c = 0.1 }, true) == 1)
 
 local afterPass = {}
 for _, id in ipairs(puddles) do afterPass[id] = nodes[id].y; nodes[id].y = before[id] end            -- the next session: the nodes are back at the map's heights, the terrain is still changed
@@ -239,6 +241,7 @@ terrainAt = base
 for _, id in ipairs(puddles) do nodes[id].y = before[id] end
 XMLFile = nil                                         -- (no saved moves for this one)
 dofile("scripts/ReseatDecals.lua")
+ReseatDecals.POST_NAMES = { "leitpfosten" }
 ReseatDecals.LIFT_M = 0
 local bridge = newNode("roadPuddlePiece", group, 90, ground(90, 0) + 9, 0, true)        -- on a bridge: the ground is 9 m below
 local bridge4 = newNode("roadPuddlePiece", group, 94, ground(94, 0) + 4, 0, true)       -- on a low bridge: 4 m, under the 6 m cap: only the ray tells

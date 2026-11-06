@@ -15,7 +15,7 @@
 
     The log says how many were found, the offset, how far off the pieces are (percentiles) and how many were moved ("[RandomFixes] puddles: ...").
 ]]
-ReseatDecals = { PATTERNS = { "puddle" }, POST_NAMES = { "leitpfosten" }, TOLERANCE = 0.06, BUDGET_REQUEST_MS = 8, BUDGET_RESTORE_MS = 1.5, START_DELAY_S = 3, MAX_NODES_PER_SLICE = 4000, FILE = "reseatDecals.xml", MIN_SAVED_M = 0.01, RING_SAMPLES = 8, RING_PART = 0.9, MAX_RING_M = 3, MAX_SHIFT_M = 6, LIFT_M = 0.015, RAY_UP_M = 0.3, RAY_LEN_M = 0.7, POST_SIDE_M = 0.3 }
+ReseatDecals = { PATTERNS = { "puddle" }, POST_NAMES = {}, TOLERANCE = 0.06, BUDGET_REQUEST_MS = 8, BUDGET_RESTORE_MS = 1.5, START_DELAY_S = 3, MAX_NODES_PER_SLICE = 4000, FILE = "reseatDecals.xml", MIN_SAVED_M = 0.01, RING_SAMPLES = 8, RING_PART = 0.9, MAX_RING_M = 3, MAX_SHIFT_M = 6, LIFT_M = 0.015, RAY_UP_M = 0.3, RAY_LEN_M = 0.7, POST_SIDE_M = 0.3 }
 
 local function say(format, ...)
     print(string.format("[RandomFixes] " .. format, ...))
@@ -31,8 +31,9 @@ function ReseatDecals.matches(name)
     return false
 end
 
--- What gets reseated: "puddles" are shapes whose name holds PATTERNS (their level is the lowest point of their border, they get the LIFT_M on top); "posts" are the roadside guide posts, groups named exactly
--- as POST_NAMES, whose origin is their foot (their level is the ground at that spot). Each class has its own normal offset over its level (the median of its members).
+-- What gets reseated: "puddles" are shapes whose name holds PATTERNS (their level is the lowest point of their border, they get the LIFT_M on top); "posts" are groups named exactly as POST_NAMES, whose origin is
+-- their foot (their level is the ground at that spot). POST_NAMES is EMPTY: CreativeHorizon's guide posts ("Leitpfosten") are nested (a container at the world origin holds the pair groups, so the container was
+-- measured 100 m under the ground and moved: every guide post on the map vanished) and are dynamic bodies with breakable joints, which a script must not move. The class stays for things that are neither. Each class has its own normal offset over its level (the median of its members).
 ReseatDecals.CLASS_LIST = { "puddles", "posts" }
 function ReseatDecals.classOf(node, name)
     local lower = string.lower(name or "")
@@ -99,8 +100,9 @@ function ReseatDecals.keyOf(name, cx, cz)
     return string.format("%s@%.2f,%.2f", name, cx, cz)
 end
 
--- what is worth saving: every piece that was moved, by key, with how far (metres, + up); entries of the file that nothing matched yet are kept
-function ReseatDecals.records(pieces, saved)
+-- what is worth saving: every piece that was moved, by key, with how far (metres, + up); entries of the file that nothing matched are kept only while the scene is not indexed (a save right after loading must
+-- not lose them), once it is they are dropped (a piece that is no longer reseated, like the guide posts, must not stay in the file)
+function ReseatDecals.records(pieces, saved, indexed)
     local list, seen = {}, {}
     for _, piece in ipairs(pieces or {}) do
         seen[piece.key] = true
@@ -109,7 +111,7 @@ function ReseatDecals.records(pieces, saved)
         end
     end
     for key, shift in pairs(saved or {}) do
-        if not seen[key] then
+        if not seen[key] and not indexed then
             list[#list + 1] = { key = key, shift = shift }
         end
     end
@@ -156,7 +158,7 @@ function ReseatDecals.save()
         return
     end
     local state = ReseatDecals.state
-    local records = ReseatDecals.records(state ~= nil and state.pieces or {}, state ~= nil and state.saved or ReseatDecals.readFile())
+    local records = ReseatDecals.records(state ~= nil and state.pieces or {}, state ~= nil and state.saved or ReseatDecals.readFile(), state ~= nil and state.indexed)
     local xml = XMLFile.create("ReseatDecals", path, "reseatDecals")
     if xml == nil then
         say("puddles: could not write %s", path)
