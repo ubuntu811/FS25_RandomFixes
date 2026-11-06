@@ -105,3 +105,8 @@ what this mod does instead, and an honest verification status. They are written 
 | [docs/TRAFFIC_SPLINE_HEIGHT.md](docs/TRAFFIC_SPLINE_HEIGHT.md) | traffic cars keep the old height after terraforming | hypothesis; to be tested with FS25_TrafficLab |
 
 Game version these were read from: FS25 as installed on 2026-10-29.
+
+## Puddles stay on the ground (ReseatDecals)
+
+The map's puddles are plain meshes at a fixed height (CreativeHorizon: ~2,330 `roadPuddlePiece` + `intersectionPuddles`); the road under them is baked into the terrain surface. Lower or raise a road and the puddles float or sink.
+A few seconds after the mission starts the scene is walked in small time-budgeted slices (0.25 ms a frame), the puddles are remembered, their normal height over the ground is measured (the median: nearly all are untouched), and every 5 s a budgeted pass moves any puddle that is off by more than 6 cm back, as a whole, up or down. The log says what it found and moved (`[RandomFixes] puddles: ...`). A bowl cannot be followed, a lowered or raised stretch can. The map's other decals (road pieces, centre lines, parking lines, manholes, tyre tracks) are baked into the terrain too and need nothing; sign decals sit on posts and are left alone. Names matched: `ReseatDecals.PATTERNS`.
