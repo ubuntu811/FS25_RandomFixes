@@ -326,7 +326,7 @@ end
 -- What to do with a hole: nil = leave it as the game made it; { obstacles = { polygon ... }, share } = fill it, and keep these islands inside it.
 function OutlineFields.fillPlan(outer, island)
     if island == nil or #island < 3 then
-        return nil
+        return nil, "no boundary"
     end
     local area = OutlineFields.polygonArea(island)
     if area < OutlineFields.SMALL_HOLE_AREA then
@@ -334,13 +334,13 @@ function OutlineFields.fillPlan(outer, island)
         -- a rock or water anywhere on it (found on the fine grid) keeps it an island as the game made it. A hole too small for a single grid point cannot be judged: kept.
         local smallShare = OutlineFields.scanObstacles(island, nil, OutlineFields.SMALL_STEP)
         if smallShare == nil or smallShare > 0 then
-            return nil
+            return nil, smallShare == nil and "small hole that could not be judged" or string.format("small hole (%.0f m2) with something on it (%.0f%%)", area, 100 * smallShare)
         end
         return { obstacles = {}, share = 0, small = true }
     end
     local hullArea = OutlineFields.polygonArea(OutlineFields.convexHull(island))
     if hullArea <= 0 or area / hullArea < OutlineFields.MIN_SOLIDITY then
-        return nil
+        return nil, string.format("not solid: it fills %.0f%% of its hull (needs %.0f%%)", 100 * area / math.max(hullArea, 1), 100 * OutlineFields.MIN_SOLIDITY)
     end
     local share, flagged, step = OutlineFields.scanObstacles(island)
     if share == nil then
@@ -348,10 +348,10 @@ function OutlineFields.fillPlan(outer, island)
         if OutlineFields.isOutlineHole(outer, island) then
             return { obstacles = {}, share = 0 }
         end
-        return nil
+        return nil, "the ray cannot be cast and it is not the signature of a plowed outline (too big a ring: not within " .. OutlineFields.OUTLINE_WIDTH .. " m of the boundary all round)"
     end
     if share > OutlineFields.KEEP_SHARE then
-        return nil
+        return nil, string.format("mostly water, forest or buildings (%.0f%% of its points)", 100 * share)
     end
     local polygons = {}
     if share > OutlineFields.OBSTACLE_SHARE then
@@ -447,8 +447,12 @@ function OutlineFields.dropOutlineHoles(field, success)
     end
     local outer = field.fieldRootBoundary.boundaryLine
     local kept, carvedIslands = {}, {}
+    local verdicts = {}
     for _, boundary in ipairs(field.islandBoundaries) do
-        local plan = OutlineFields.fillPlan(outer, boundary.boundaryLine)
+        local plan, why = OutlineFields.fillPlan(outer, boundary.boundaryLine)
+        if plan == nil then
+            verdicts[#verdicts + 1] = string.format("%.2f ha (%.0f%% of the field): %s", OutlineFields.polygonArea(boundary.boundaryLine) / 10000, 100 * OutlineFields.polygonArea(boundary.boundaryLine) / math.max(1, OutlineFields.polygonArea(outer)), why or "kept")
+        end
         local carved, failed = {}, false
         if plan ~= nil then
             for _, polygon in ipairs(plan.obstacles) do
@@ -472,6 +476,9 @@ function OutlineFields.dropOutlineHoles(field, success)
                 #carved > 0 and string.format("; %d lake / forest / building area(s) in it (%.0f%% of the hole) stay islands", #carved, 100 * plan.share) or "")
         end
     end
+    if #dropped == 0 and #verdicts > 0 then
+        say("outline field: the field is %.2f ha with %d island(s), none of them a bare hole of an outline: %s", OutlineFields.polygonArea(outer) / 10000, #field.islandBoundaries, table.concat(verdicts, "; "))
+    end
     if #dropped > 0 then
         for _, made in ipairs(carvedIslands) do
             kept[#kept + 1] = made
@@ -484,6 +491,9 @@ end
 
 -- finishTask: drops the holes, and decides whether a detection that was started from INSIDE an outline stands: only when the start point really is inside a dropped hole
 function OutlineFields.finish(field, success)
+    if success ~= true and field ~= nil and OutlineFields.ENABLED then
+        say("outline field: the game found no field at %.0f %.0f%s", field.startX or 0, field.startZ or 0, field.rfInsideStart ~= nil and " (started from the grass inside, looked for field ground nearby)" or "")
+    end
     local dropped = OutlineFields.dropOutlineHoles(field, success)
     if success == true and field ~= nil and field.rfInsideStart ~= nil then
         local start = field.rfInsideStart
@@ -637,6 +647,37 @@ function OutlineFields.consoleToggle(_, argument)
     end
     return "RandomFixes outline fields (the inside of a plowed outline is part of the field for the AI worker): " .. (OutlineFields.ENABLED and "ON" or "OFF (the game's own islands; applies from the next course made)")
 end
+-- Why a course came out empty ("No field detected for preview"): how the generator ended. Logged for every generation that ends with no segments.
+if FieldCourseSegmentGenerator ~= nil and FieldCourseSegmentGenerator.finish ~= nil and Utils ~= nil and not OutlineFields.generatorHooked then
+    OutlineFields.generatorHooked = true
+    FieldCourseSegmentGenerator.finish = Utils.prependedFunction(FieldCourseSegmentGenerator.finish, function(self)
+        local ok, err = pcall(function()
+            if not OutlineFields.ENABLED then
+                return
+            end
+            -- the generator keeps its segments in a local of finish(): it came out empty when it ended in any state but FINISHED, or FINISHED with no lanes and no headlands
+            if FieldCourseGenerationState ~= nil and self.state == FieldCourseGenerationState.FINISHED and (next(self.linesByGroup or {}) ~= nil or (self.headlandBoundaries ~= nil and #self.headlandBoundaries > 0)) then
+                return
+            end
+            local stateName = tostring(self.state)
+            if FieldCourseGenerationState ~= nil then
+                for name, value in pairs(FieldCourseGenerationState) do
+                    if value == self.state then
+                        stateName = name
+                    end
+                end
+            end
+            local field = self.courseField
+            say("outline field: a course came out empty (generator state %s): field %s, %d headland(s) made, headlands wanted %s, implement width %s", stateName,
+                field ~= nil and string.format("%.2f ha, %d island(s)", field.fieldRootBoundary ~= nil and OutlineFields.polygonArea(field.fieldRootBoundary.boundaryLine) / 10000 or 0, field.islands ~= nil and #field.islands or 0) or "none",
+                self.headlandBoundaries ~= nil and #self.headlandBoundaries or 0, tostring(self.fieldCourseSettings ~= nil and self.fieldCourseSettings.numHeadlands), tostring(self.fieldCourseSettings ~= nil and self.fieldCourseSettings.implementWidth))
+        end)
+        if not ok then
+            say("outline field: the diagnostic failed (%s)", tostring(err))
+        end
+    end)
+end
+
 if addConsoleCommand ~= nil then
     addConsoleCommand("rfOutlineFields", "Switch the AI worker filling the inside of a plowed outline on / off (on | off, or no argument to toggle)", "consoleToggle", OutlineFields)
 end
