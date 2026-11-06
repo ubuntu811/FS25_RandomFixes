@@ -215,6 +215,33 @@ terrainRows = {}
 g_currentMission.waila = wailaWith()
 run(1)
 check("WAILA reloaded (a new list): the row is added again", #terrainRows == 1)
+
+-- a WAILA with scan hooks: the layer scan starts the pass for the area it covers (nil: the whole map); no row, no tab
+registered = {}
+local hooks = {}
+g_currentMission.waila = { registerDebugTab = function(d) registered[#registered + 1] = d end, registerScanHook = function(id, fn) hooks[id] = fn; return true end, addDebugAction = function() error("not used when the scan hook is there") end }
+terrainAt = base
+for _, id in ipairs(puddles) do nodes[id].y = before[id] end
+XMLFile = nil                                         -- (no saved moves for this one)
+dofile("scripts/ReseatDecals.lua")
+run(2)
+check("the scan hook is registered, nothing else", hooks["randomfixes.reseat"] ~= nil and #registered == 0)
+terrainAt = function(x, z) return base(x, z) - ((x >= 20 and x < 40 or x >= 60 and x < 80) and 0.5 or 0) end       -- two stretches of the road lowered by 50 cm (a minority: the median stays the untouched offset)
+hooks["randomfixes.reseat"]({ minX = 20, maxX = 40, minZ = -10, maxZ = 10 })       -- an area rescan over the first stretch
+run(ReseatDecals.START_DELAY_S + 10)
+local inArea, outArea = 0, 0
+for _, id in ipairs(puddles) do
+    local x = nodes[id].x
+    local moved = math.abs(nodes[id].y - before[id]) > 0.4
+    if x >= 21 and x <= 39 and moved then inArea = inArea + 1 end
+    if x >= 61 and x <= 79 and moved then outArea = outArea + 1 end
+end
+check("an area scan reseats the puddles in its rectangle (the 19 clear of the edges) and not those outside it", inArea == 19 and outArea == 0)
+hooks["randomfixes.reseat"](nil)
+run(10)
+local second = 0
+for _, id in ipairs(puddles) do local x = nodes[id].x; if x >= 61 and x <= 79 and math.abs(nodes[id].y - before[id]) > 0.4 then second = second + 1 end end
+check("the whole-map scan reseats the other stretch", second == 19)
 print = realPrint
 realPrint(string.format("reseat_decals_test: %d/%d passed", passed, passed + failed))
 os.exit(failed == 0 and 0 or 1)

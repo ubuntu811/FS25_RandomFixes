@@ -210,7 +210,7 @@ local function collect(state, budgetMs)
             local node = top.node
             if getHasClassId(node, ClassIds.SHAPE) and ReseatDecals.matches(getName(node)) then
                 local cx, _, cz = getShapeWorldBoundingSphere(node)
-                state.pieces[#state.pieces + 1] = { node = node, key = ReseatDecals.keyOf(getName(node), cx, cz), shift = 0 }
+                state.pieces[#state.pieces + 1] = { node = node, key = ReseatDecals.keyOf(getName(node), cx, cz), shift = 0, cx = cx, cz = cz }
             end
             top.count = getNumOfChildren(node)
         end
@@ -263,10 +263,16 @@ end
 
 local function sweep(state, budgetMs)
     local t0 = now()
+    local rect = state.rect
     while state.cursor <= #state.pieces do
         local piece = state.pieces[state.cursor]
-        local y, ground = height(piece)
-        local delta = ReseatDecals.shiftFor(y, ground, state.offset, ReseatDecals.TOLERANCE)
+        local inside = rect == nil or (piece.cx >= rect.minX and piece.cx < rect.maxX and piece.cz >= rect.minZ and piece.cz < rect.maxZ)
+        local y, ground
+        local delta = nil
+        if inside then
+            y, ground = height(piece)
+            delta = ReseatDecals.shiftFor(y, ground, state.offset, ReseatDecals.TOLERANCE)
+        end
         if delta ~= nil then
             local x, wy, z = getWorldTranslation(piece.node)
             setWorldTranslation(piece.node, x, wy + delta, z)
@@ -307,7 +313,7 @@ local function startCollect(state, purpose)
 end
 
 -- asks for a pass: returns a line for the screen / console
-function ReseatDecals.requestPass()
+function ReseatDecals.requestPass(rect)
     local state = ReseatDecals.state
     if state == nil or g_currentMission == nil then
         return "not ready yet"
@@ -316,7 +322,8 @@ function ReseatDecals.requestPass()
         return "a pass is running"
     end
     state.wantPass = true
-    return "reseating the map puddles"
+    state.rect = rect
+    return rect == nil and "reseating the map puddles" or "reseating the map puddles in the scanned area"
 end
 
 function ReseatDecals.status()
@@ -427,7 +434,7 @@ function ReseatDecals.update(dt)
     end
 end
 
--- the button, as a row of the Terrain tab of WAILA's debug hub (Waila.addDebugAction; an older WAILA without it gets a tab of its own); WAILA may load after this mod: tried every frame until it is there,
+-- the trigger: WAILA's layer scan (Waila.registerScanHook: called when a whole-map or area scan starts); an older WAILA gets a row of its Terrain tab (Waila.addDebugAction) or a tab of its own; WAILA may load after this mod: tried every frame until it is there,
 -- and again if WAILA is reloaded (its Terrain tab's list is then a new table)
 function ReseatDecals.registerTab()
     local waila = g_currentMission ~= nil and g_currentMission.waila or nil
@@ -435,6 +442,12 @@ function ReseatDecals.registerTab()
         return
     end
     local function run() print(string.format("[RandomFixes] %s", ReseatDecals.requestPass())) end
+    -- the layer scan (the whole map or "rescan around me") starts the pass for the area it covers: no row, no tab
+    if waila.registerScanHook ~= nil and waila.registerScanHook("randomfixes.reseat", function(rect) print(string.format("[RandomFixes] %s", ReseatDecals.requestPass(rect))) end) then
+        ReseatDecals.tabDone = true
+        ReseatDecals.addedTo = nil
+        return
+    end
     if waila.addDebugAction ~= nil and waila.addDebugAction("terrain", {
         key = "randomfixes.reseat",
         getLabel = function() return "Reseat the map's puddles on the ground (" .. ReseatDecals.status() .. ")" end,
