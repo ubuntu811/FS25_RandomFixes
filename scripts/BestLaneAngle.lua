@@ -146,24 +146,41 @@ function BestLaneAngle.choose(boundary, steps)
     return BestLaneAngle.best(boundary, steps)
 end
 
+-- The hook body. The game calls the static function (centerX, centerZ, boundary, steps) and Utils.overwrittenFunction hands the first argument over as "self": (centerX, superFunc, centerZ, boundary, steps).
+-- Taken by type, so that (superFunc, centerX, ...) and (nil, superFunc, centerX, ...) work too.
+function BestLaneAngle.wrap(a, b, ...)
+    local superFunc, centerX, centerZ, boundary, steps
+    if type(a) == "function" then
+        superFunc = a
+        centerX, centerZ, boundary, steps = b, ...
+    elseif a == nil then
+        superFunc = b
+        centerX, centerZ, boundary, steps = ...
+    else
+        superFunc = b
+        centerX = a
+        centerZ, boundary, steps = ...
+    end
+    if not BestLaneAngle.ENABLED or type(boundary) ~= "table" or #boundary < 3 then
+        return superFunc(centerX, centerZ, boundary, steps)
+    end
+    local ok, dirX, dirZ, extent, firstExtent = pcall(BestLaneAngle.choose, boundary, steps or 16)
+    if not ok or dirX == nil then
+        return superFunc(centerX, centerZ, boundary, steps)
+    end
+    local angle = MathUtil.getYRotationFromDirection(dirX, dirZ)
+    angle = angle % math.pi                                          -- (a lane has no direction: 0 .. 180 degrees, as the game's own)
+    if BestLaneAngle.logged < BestLaneAngle.LOG_FIRST and extent < (firstExtent or extent) - 1 then
+        BestLaneAngle.logged = BestLaneAngle.logged + 1
+        say("lane angle (%s): %.0f degrees (the lanes are %.0f m across, the game's first angle 0 would make it %.0f m)", BestLaneAngle.RULE, math.deg(angle), extent, firstExtent)
+    end
+    return angle
+end
+
 if BoundaryLineGenerationTask ~= nil and BoundaryLineGenerationTask.getOptimalBoundaryAngle ~= nil and Utils ~= nil and not BestLaneAngle.hooked then
     BestLaneAngle.hooked = true
-    BoundaryLineGenerationTask.getOptimalBoundaryAngle = Utils.overwrittenFunction(BoundaryLineGenerationTask.getOptimalBoundaryAngle, function(self, superFunc, centerX, centerZ, boundary, steps)
-        if not BestLaneAngle.ENABLED or boundary == nil or #boundary < 3 then
-            return superFunc(self, centerX, centerZ, boundary, steps)
-        end
-        local ok, dirX, dirZ, extent, firstExtent = pcall(BestLaneAngle.choose, boundary, steps or 16)
-        if not ok or dirX == nil then
-            return superFunc(self, centerX, centerZ, boundary, steps)
-        end
-        local angle = MathUtil.getYRotationFromDirection(dirX, dirZ)
-        angle = angle % math.pi                                      -- (a lane has no direction: 0 .. 180 degrees, as the game's own)
-        if BestLaneAngle.logged < BestLaneAngle.LOG_FIRST and extent < (firstExtent or extent) - 1 then
-            BestLaneAngle.logged = BestLaneAngle.logged + 1
-            say("lane angle (%s): %.0f degrees (the lanes are %.0f m across, the game's first angle 0 would make it %.0f m)", BestLaneAngle.RULE, math.deg(angle), extent, firstExtent)
-        end
-        return angle
-    end)
+    -- A static function: Utils.overwrittenFunction hands the first call argument over as "self", so the order is (centerX, superFunc, centerZ, boundary, steps). BestLaneAngle.wrap sorts that out by type.
+    BoundaryLineGenerationTask.getOptimalBoundaryAngle = Utils.overwrittenFunction(BoundaryLineGenerationTask.getOptimalBoundaryAngle, BestLaneAngle.wrap)
 end
 
 if addConsoleCommand ~= nil and not BestLaneAngle.commandAdded then

@@ -1,6 +1,7 @@
 -- plain Lua: the lane direction with the smallest extent across the lanes, and the override of the game's getOptimalBoundaryAngle
 local passed, failed = 0, 0
 local realPrint = print
+
 local function check(name, ok) if ok then passed = passed + 1 else failed = failed + 1; realPrint("  FAIL " .. name) end end
 local log = {}
 print = function(text) log[#log + 1] = text end
@@ -79,16 +80,27 @@ cx, cz, cext = BestLaneAngle.choose(circle, 16)
 check("a circle with the side rule: the extent rule answers (a 36-gon is about 199 m across in every direction)", cx ~= nil and cext > 198 and cext < 200.01)
 
 -- the override
-local angle = BoundaryLineGenerationTask:getOptimalBoundaryAngle(0, 0, r, 16)
+local angle = BoundaryLineGenerationTask.getOptimalBoundaryAngle(0, 0, r, 16)
 check("the override returns the angle of the long side (east-west lanes: 90 degrees), in 0 .. 180", math.abs(angle - math.pi / 2) < 1e-6 and angle >= 0 and angle < math.pi)
-angle = BoundaryLineGenerationTask:getOptimalBoundaryAngle(0, 0, tall, 16)
+angle = BoundaryLineGenerationTask.getOptimalBoundaryAngle(0, 0, tall, 16)
 check("a field long north to south: 0 as before", math.abs(angle) < 1e-6 or math.abs(angle - math.pi) < 1e-6)
-check("the lines are as the game computes them from that angle: direction (sin, cos)", (function() local a = BoundaryLineGenerationTask:getOptimalBoundaryAngle(0, 0, turned, 16); local x, z = MathUtil.getDirectionFromYRotation(a); return math.abs(BestLaneAngle.extent(turned, x, z) - 120) < 1e-6 end)())
+check("the lines are as the game computes them from that angle: direction (sin, cos)", (function() local a = BoundaryLineGenerationTask.getOptimalBoundaryAngle(0, 0, turned, 16); local x, z = MathUtil.getDirectionFromYRotation(a); return math.abs(BestLaneAngle.extent(turned, x, z) - 120) < 1e-6 end)())
 check("it said so (once per call, the first few)", #log >= 1 and tostring(log[1]):find("lane angle", 1, true) ~= nil)
 BestLaneAngle.ENABLED = false
-check("switched off: the game's own answer", BoundaryLineGenerationTask:getOptimalBoundaryAngle(0, 0, r, 16) == 0)
+check("switched off: the game's own answer", BoundaryLineGenerationTask.getOptimalBoundaryAngle(0, 0, r, 16) == 0)
 BestLaneAngle.ENABLED = true
-check("a degenerate boundary: the game's own answer", BoundaryLineGenerationTask:getOptimalBoundaryAngle(0, 0, { { 0, 0 }, { 1, 1 } }, 16) == 0)
+check("a degenerate boundary: the game's own answer", BoundaryLineGenerationTask.getOptimalBoundaryAngle(0, 0, { { 0, 0 }, { 1, 1 } }, 16) == 0)
 print = realPrint
+-- the hook body, whichever way Utils.overwrittenFunction hands the arguments over
+do
+    local square = { { 0, 0 }, { 100, 0 }, { 100, 30 }, { 0, 30 } }
+    local seen = nil
+    local function super(...) seen = { ... }; return "super" end
+    local a1, a2, a3 = BestLaneAngle.wrap(5, super, 7, square, 16), BestLaneAngle.wrap(super, 5, 7, square, 16), BestLaneAngle.wrap(nil, super, 5, 7, square, 16)
+    check("the hook sorts the arguments in all three orders and answers the same angle, not the game's", type(a1) == "number" and a1 == a2 and a2 == a3)
+    seen = nil
+    BestLaneAngle.wrap(5, super, 7, 16, nil)
+    check("a boundary that is no table goes to the game's own function with the right arguments", seen ~= nil and seen[1] == 5 and seen[2] == 7 and seen[3] == 16)
+end
 realPrint(string.format("best_lane_angle_test: %d/%d passed", passed, passed + failed))
 os.exit(failed == 0 and 0 or 1)
