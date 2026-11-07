@@ -42,6 +42,42 @@ end
 check("a convex field: no angle of a 0.1 degree grid is better than the best candidate", bExtent <= brute + 1e-6)
 check("and it is better than the game's angle 0", bExtent < BestLaneAngle.extent(quad, 0, 1) - 1)
 
+
+-- the longest side (the default rule)
+local function deg(dx, dz) return (math.deg(math.atan2(dx, dz)) % 180) end
+local sx, sz, slen, sides = BestLaneAngle.longestSide(rect(200, 100))
+check("a rectangle: the long side, 200 m, 4 sides", math.abs(deg(sx, sz) - 90) < 1e-6 and math.abs(slen - 200) < 1e-6 and sides == 4)
+sx, sz = BestLaneAngle.longestSide(rect(300, 120, math.rad(33)))
+check("a rectangle turned by 33 degrees: that angle exactly (the side runs 33 degrees from east: direction angle 57)", math.abs(deg(sx, sz) - 57) < 1e-6)
+-- a side that came out of the simplification as three edges that bend 5 degrees each is one side
+local bent = { { 0, 0 }, { 120, 5 }, { 240, 15 }, { 360, 30 }, { 380, 200 }, { 100, 210 }, { 0, 0 } }
+sx, sz, slen, sides = BestLaneAngle.longestSide(bent)
+check("three slightly bent edges are one side, longer than the others", sides < 6 and slen > 340)
+-- a hand-driven outline: every side wobbles by up to 2 m, the long side is cut into many pieces
+local wobbly = {}
+local function add2(x, z) wobbly[#wobbly + 1] = { x, z } end
+for k = 0, 20 do add2(k * 20, (k % 3 - 1) * 1.5) end                       -- the south side, 400 m, as 21 points
+for k = 1, 8 do add2(400 + (k % 2) * 1.2, k * 12) end                       -- the east side, 96 m
+for k = 0, 20 do add2(400 - k * 20, 96 + (k % 3 - 1) * 1.5) end             -- the north side
+for k = 1, 7 do add2((k % 2) * 1.2, 96 - k * 12) end                        -- the west side
+add2(wobbly[1][1], wobbly[1][2])
+sx, sz = BestLaneAngle.longestSide(wobbly)
+check("a wobbly hand-driven outline: the lanes still follow the long (east-west) side within 3 degrees", math.abs(deg(sx, sz) - 90) < 3)
+-- a round field has no side
+local circle = {}
+for k = 0, 35 do local a = math.rad(k * 10); circle[#circle + 1] = { 100 * math.cos(a), 100 * math.sin(a) } end
+circle[#circle + 1] = { circle[1][1], circle[1][2] }
+check("a round field has no sharp corner: no side, the extent rule takes over", BestLaneAngle.longestSide(circle) == nil)
+-- the choice: by RULE
+local cx, cz, cext, c0 = BestLaneAngle.choose(rect(200, 100), 16)
+check("the default rule takes the long side: 100 m across, the game's angle 0 would make it 200", BestLaneAngle.RULE == "side" and math.abs(cext - 100) < 1e-9 and math.abs(c0 - 200) < 1e-9)
+BestLaneAngle.RULE = "extent"
+cx, cz, cext = BestLaneAngle.choose(rect(200, 100), 16)
+check("rule extent: the same for a rectangle", math.abs(cext - 100) < 1e-9)
+BestLaneAngle.RULE = "side"
+cx, cz, cext = BestLaneAngle.choose(circle, 16)
+check("a circle with the side rule: the extent rule answers (a 36-gon is about 199 m across in every direction)", cx ~= nil and cext > 198 and cext < 200.01)
+
 -- the override
 local angle = BoundaryLineGenerationTask:getOptimalBoundaryAngle(0, 0, r, 16)
 check("the override returns the angle of the long side (east-west lanes: 90 degrees), in 0 .. 180", math.abs(angle - math.pi / 2) < 1e-6 and angle >= 0 and angle < math.pi)
