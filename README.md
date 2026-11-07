@@ -77,7 +77,7 @@ works. Once a vehicle has loaded, the crops the cutter takes and the preparer do
 The minimap's field picture is regenerated in the background by the engine, all of it, on a timer: the next generation starts 5 s after the last one finished, and nothing starts one
 because the ground changed. A meadow plowed just after a generation began therefore waits for the rest of it, the 5 s, and a whole generation more. While you plow or cultivate, the
 picture is now asked to start its next generation 2 s after the last one (instead of 5 s), and the time of every generation is logged once a minute, so we can see how much of the wait is
-the engine's generation itself. See [docs/FIELDS_OVERLAY.md](docs/FIELDS_OVERLAY.md). Test: `lua5.1 tests/fields_overlay_test.lua`. `FieldsOverlay.ENABLED = false` switches it off.
+the engine's generation itself. See [docs/FIELDS_OVERLAY.md](docs/FIELDS_OVERLAY.md). Test: `lua5.1 tests/fields_overlay_test.lua`. `FieldsOverlay.ENABLED = false` switches it off. The console command `rfFieldsOverlay [off|on|gap <ms>]` switches it or changes the wait between generations, for finding out whether the faster refresh costs frames while AI workers are busy (each generation takes 0.4 to 2 s of engine time).
 
 ## AI worker on the outline of a new field
 
@@ -87,6 +87,8 @@ before the course is made: an island that is big (a quarter of the field or more
 goes: bare meadow of a quarter of a hectare or more, solid, with no water, buildings or trees on it (checked with rays from above, so it works on a part plowed field too, where what is left is no ring any more); ponds, farmyards and small islands stay. A helper job restored after a game restart still creates the field: the switch looks at what the course covers, not at a mark. The plow, cultivator and disc harrow also count "not a field yet" ground as workable for the AI (the plow creates the field as it
 works), kept when the game rebuilds their requirements. Water, forest and buildings inside the inside become islands of their own (the lanes go round them, the rest is plowed); a hole that is mostly such things stays an island. The helper, or the AI settings preview, can be started on the plowed ring or on the grass inside it. See [docs/OUTLINE_FIELDS.md](docs/OUTLINE_FIELDS.md). Test:
 `lua5.1 tests/outline_fields_test.lua`. The console command `rfOutlineFields on|off` switches it (a plowed frame with a meadow deliberately left in the middle looks exactly like an outline: with it off that inside is driven by hand).
+
+When the AI says "No field detected" the log now says why: `outline field: the field is N ha with M island(s), none of them a bare hole of an outline: ...` (what was looked at and why each island was kept), `the game found no field at X Z`, and `a course came out empty (generator state ...): field ..., N headland(s) made, headlands wanted ..., implement width ...` when the course generator itself returned nothing.
 
 ## For the game: write-ups of what is wrong and how it could be fixed
 
@@ -121,6 +123,8 @@ The roadside guide posts follow an edited road too, each at its own spot. Creati
 What is left alone, and what follows a structure:
 
 Pieces that **rest on a structure** take the structure's surface as their level: before a piece is moved, or when it is too far off the terrain to be moved (only the few dozen that qualify, not thousands), a ray goes straight down from 30 cm above it, 70 cm long, against static objects, buildings and road colliders (`CollisionFlag` STATIC_OBJECT, BUILDING, ROAD; not the terrain). The height where it hits is the true surface height there, and the piece is set to that plus its class's normal offset (and the puddle lift): a bridge deck that did not move leaves it where it is (the difference is below the tolerance), a deck or slab that was moved (MovePlaceablesAdvanced) takes it along. A puddle has no collision of its own, so its own spot is cast; a post has (its parts are ignored), so four spots 30 cm to its sides are (the highest hit counts). A piece with nothing under it that is far off is a cut road, and moves. As a safety net anything more than 6 m off the terrain (`MAX_SHIFT_M`) with no structure under it is left alone, and moves of that size in an old `reseatDecals.xml` are ignored at load (the first real pass found puddles 8.6 m off: bridges). The log counts both kinds. A puddle that is moved gets 1.5 cm on top (`LIFT_M`) so the ground's 1 m triangles do not poke through it.
+
+The console command `reseatPostTest [dy]` is the experiment this was built from: it moves the guide post nearest to you by `dy` metres (default 0.3) and prints where the post and its collision body ended up.
 
 An optional extra: `ReseatDecals.POST_MAX_SHARE = 0.10` makes a pass refuse to move more than that share of all the posts (at least `POST_MAX_MIN`, 8) at once; it is off by default (once the algorithm is trusted it is not needed). If a bad pass was ever saved, delete `reseatDecals.xml` in the savegame folder: the next load starts from the map's own heights.
 
