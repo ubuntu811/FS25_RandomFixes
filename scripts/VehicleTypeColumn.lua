@@ -19,6 +19,7 @@
 VehicleTypeColumn = {}
 
 VehicleTypeColumn.COLUMN = 7
+VehicleTypeColumn.LOG_FIRST = 16                    -- rows logged (one line each) until the game restarts: what the game wrote and what we put there
 VehicleTypeColumn.modName = g_currentModName
 
 local function say(format, ...)
@@ -68,7 +69,13 @@ function VehicleTypeColumn.populate(frame, list, section, index, cell)
     local item = frame.vehicles[index]
     if element ~= nil and item ~= nil then
         local column = item.columns ~= nil and item.columns[VehicleTypeColumn.COLUMN] or nil
+        local before = element.getText ~= nil and element:getText() or nil
         element:setText(column ~= nil and column.text or "-")
+        if (VehicleTypeColumn.logged or 0) < VehicleTypeColumn.LOG_FIRST then
+            VehicleTypeColumn.logged = (VehicleTypeColumn.logged or 0) + 1
+            local sameElement = cell.getAttribute ~= nil and cell:getAttribute("licensePlate") == element
+            say("type column row %d: shows '%s' (the game had written '%s'), the game's licensePlate element is ours: %s", index, tostring(column ~= nil and column.text or "-"), tostring(before), tostring(sameElement))
+        end
     end
 end
 

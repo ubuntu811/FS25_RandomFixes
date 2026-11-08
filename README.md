@@ -14,7 +14,7 @@ it changes nothing and the log says why (`[RandomFixes] no type column (...)`).
 (An earlier version added a new column and moved the others; rows the list had already built kept the old layout and the table fell apart. Replacing the plate cell has no such
 problem.)
 
-Test: `lua5.1 tests/vehicle_type_column_test.lua` (a fake GUI, 27 checks).
+For the first 16 rows of a session the log says what the game had written in the cell and what the column put there (`[RandomFixes] type column row N: shows 'X' (the game had written 'Y') ...`), for finding out why a row still shows its licence plate. Test: `lua5.1 tests/vehicle_type_column_test.lua` (a fake GUI, 27 checks).
 
 ## Vehicles list: it opens on the machine you are sitting in
 
