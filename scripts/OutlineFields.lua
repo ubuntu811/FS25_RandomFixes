@@ -492,7 +492,9 @@ end
 -- finishTask: drops the holes, and decides whether a detection that was started from INSIDE an outline stands: only when the start point really is inside a dropped hole
 function OutlineFields.finish(field, success)
     if success ~= true and field ~= nil and OutlineFields.ENABLED then
-        say("outline field: the game found no field at %.0f %.0f%s", field.startX or 0, field.startZ or 0, field.rfInsideStart ~= nil and " (started from the grass inside, looked for field ground nearby)" or "")
+        local sx, sz = field.startX or 0, field.startZ or 0
+        local onField = OutlineFields.isFieldAt(sx, sz)
+        say("outline field: the game found no field at %.0f %.0f%s (the start is %s)", sx, sz, field.rfInsideStart ~= nil and " (started from the grass inside, looked for field ground nearby)" or "", onField and "field ground: the game's own detection failed here" or "NOT field ground and none was found within " .. OutlineFields.SEARCH_MAX .. " m")
     end
     local dropped = OutlineFields.dropOutlineHoles(field, success)
     if success == true and field ~= nil and field.rfInsideStart ~= nil then
