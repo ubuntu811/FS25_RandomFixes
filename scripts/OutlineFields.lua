@@ -38,6 +38,9 @@ OutlineFields.KEEP_SHARE = 0.6              -- a hole with more than this share 
 OutlineFields.LINK_STEPS = 2.2              -- points with something on them that are this many grid steps apart or less are one lake / forest / yard
 OutlineFields.OBSTACLE_MARGIN = 4.0         -- metres: the carved island is the cluster plus this much all round (the vehicle has to turn beside it)
 OutlineFields.MAX_OBSTACLE_ISLANDS = 20     -- at most this many carved islands (the game syncs 31 in all), the biggest first
+OutlineFields.FENCE_TOLERANCE = 1.0         -- metres: fence segment ends this close are one corner
+OutlineFields.FENCE_MAX_RATIO = 1.3          -- a fence is the hole's island when it encloses no more than this times the hole's area (the player fences a little outside the grass)
+OutlineFields.FENCE_MARGIN = 1.5            -- metres: a closed fence is an island of its own, the loop plus this much all round (the player drew the outline: only room for the vehicle to turn)
 OutlineFields.RAY_ABOVE = 60                -- the ray starts this far above the terrain (as WAILA's layer scan)
 OutlineFields.WATER_DEPTH = 0.15            -- a water plane this far above the terrain is water
 OutlineFields.BUILDING_HEIGHT = 1.5
@@ -323,8 +326,157 @@ function OutlineFields.clusterPolygon(cluster, step, island, sign)
     return line
 end
 
+-- ===== fences: the player's own outline of a keep-out (a pylon, stones, a pen) =====
+-- Segments { x1, z1, x2, z2 } -> the closed loops they make: { { {x, z}, ... }, ... }. Ends within FENCE_TOLERANCE are one corner; only a chain where every corner joins exactly two segments and that
+-- closes on itself is a loop (an open fence, a fork or a T is not an outline). Pure.
+function OutlineFields.fenceLoops(segments)
+    local tol2 = OutlineFields.FENCE_TOLERANCE ^ 2
+    local nodes = {}
+    local function nodeAt(x, z)
+        for i, n in ipairs(nodes) do
+            if (n.x - x) ^ 2 + (n.z - z) ^ 2 <= tol2 then
+                return i
+            end
+        end
+        nodes[#nodes + 1] = { x = x, z = z, edges = {} }
+        return #nodes
+    end
+    local edges = {}
+    for _, seg in ipairs(segments) do
+        local a, b = nodeAt(seg.x1, seg.z1), nodeAt(seg.x2, seg.z2)
+        if a ~= b then
+            edges[#edges + 1] = { a, b }
+            table.insert(nodes[a].edges, #edges)
+            table.insert(nodes[b].edges, #edges)
+        end
+    end
+    local loops, visited = {}, {}
+    for start = 1, #nodes do
+        if not visited[start] then
+            -- walk the component; it is a loop when every node has exactly two edges
+            local component, stack, closed = {}, { start }, true
+            visited[start] = true
+            while #stack > 0 do
+                local n = table.remove(stack)
+                component[#component + 1] = n
+                if #nodes[n].edges ~= 2 then
+                    closed = false
+                end
+                for _, e in ipairs(nodes[n].edges) do
+                    local other = edges[e][1] == n and edges[e][2] or edges[e][1]
+                    if not visited[other] then
+                        visited[other] = true
+                        stack[#stack + 1] = other
+                    end
+                end
+            end
+            if closed and #component >= 3 then
+                local loop, previous, current = {}, nil, start
+                for _ = 1, #component do
+                    loop[#loop + 1] = { nodes[current].x, nodes[current].z }
+                    local nextNode = nil
+                    for _, e in ipairs(nodes[current].edges) do
+                        local other = edges[e][1] == current and edges[e][2] or edges[e][1]
+                        if other ~= previous and nextNode == nil then
+                            nextNode = other
+                        end
+                    end
+                    previous, current = current, nextNode
+                    if current == nil then
+                        break
+                    end
+                end
+                if #loop == #component then
+                    loops[#loops + 1] = loop
+                end
+            end
+        end
+    end
+    return loops
+end
+
+-- A loop pushed out by `margin` (every edge moves that far outwards; a corner follows its two edges), wound the way `sign` says (the sign of the signed area of the hole). Pure.
+function OutlineFields.expandLoop(loop, margin, sign)
+    local n = #loop
+    local area = OutlineFields.signedArea(loop)
+    local outward = area >= 0 and -1 or 1           -- (the right-hand normal of a counter-clockwise edge points out)
+    local function normal(a, b)
+        local dx, dz = b[1] - a[1], b[2] - a[2]
+        local length = math.sqrt(dx * dx + dz * dz)
+        if length < 1e-6 then
+            return nil
+        end
+        return outward * dz / length * -1, outward * dx / length
+    end
+    local out = {}
+    for i = 1, n do
+        local prev, v, nxt = loop[(i - 2) % n + 1], loop[i], loop[i % n + 1]
+        local n1x, n1z = normal(prev, v)
+        local n2x, n2z = normal(v, nxt)
+        if n1x == nil or n2x == nil then
+            out[#out + 1] = { v[1], v[2] }
+        else
+            local k = 1 + n1x * n2x + n1z * n2z
+            k = math.max(k, 0.3)                    -- (a very sharp corner is not pushed to infinity)
+            out[#out + 1] = { v[1] + (n1x + n2x) / k * margin, v[2] + (n1z + n2z) / k * margin }
+        end
+    end
+    if (OutlineFields.signedArea(out) >= 0) ~= (sign >= 0) then
+        local reversed = {}
+        for i = #out, 1, -1 do
+            reversed[#reversed + 1] = out[i]
+        end
+        out = reversed
+    end
+    return out
+end
+
+-- The closed fences that belong to the hole `island`, as islands (polygon, padded): the fence's middle is in the hole, the fence is no bigger than the hole and lies inside the field `outer`. A fence round
+-- the whole inside of an outline (the player fenced the pylons and stones in) is one island that covers the hole; a small one round a pylon is a small island. Pure given loops.
+function OutlineFields.fenceIslands(island, loops, sign, outer)
+    local out = {}
+    local holeArea = math.abs(OutlineFields.polygonArea(island))
+    for _, loop in ipairs(loops or {}) do
+        local cx, cz = 0, 0
+        for _, v in ipairs(loop) do
+            cx, cz = cx + v[1], cz + v[2]
+        end
+        cx, cz = cx / #loop, cz / #loop
+        local inField = true
+        for _, v in ipairs(loop) do
+            if outer ~= nil and not OutlineFields.pointInPolygon(v[1], v[2], outer) then
+                inField = false
+                break
+            end
+        end
+        if inField and OutlineFields.pointInPolygon(cx, cz, island) and math.abs(OutlineFields.polygonArea(loop)) <= holeArea * OutlineFields.FENCE_MAX_RATIO then
+            out[#out + 1] = OutlineFields.expandLoop(loop, OutlineFields.FENCE_MARGIN, sign)
+        end
+    end
+    return out
+end
+
+-- engine side: the segments of the fences the player placed (fences and pens, not the rows of a vineyard or an orchard), then the loops they make.
+function OutlineFields.placedFenceLoops()
+    local segments = {}
+    local ok = pcall(function()
+        local system = g_currentMission ~= nil and g_currentMission.placeableSystem or nil
+        for _, placeable in ipairs(system ~= nil and system.placeables or {}) do
+            if placeable.getFence ~= nil and placeable.spec_vine == nil and placeable.harvestVine == nil then
+                local fence = placeable:getFence()
+                for _, segment in ipairs(fence ~= nil and fence:getSegments() or {}) do
+                    if segment.startPosX ~= nil and segment.endPosX ~= nil then
+                        segments[#segments + 1] = { x1 = segment.startPosX, z1 = segment.startPosZ, x2 = segment.endPosX, z2 = segment.endPosZ }
+                    end
+                end
+            end
+        end
+    end)
+    return ok and OutlineFields.fenceLoops(segments) or {}
+end
+
 -- What to do with a hole: nil = leave it as the game made it; { obstacles = { polygon ... }, share } = fill it, and keep these islands inside it.
-function OutlineFields.fillPlan(outer, island)
+function OutlineFields.fillPlan(outer, island, fenceLoops)
     if island == nil or #island < 3 then
         return nil, "no boundary"
     end
@@ -354,19 +506,30 @@ function OutlineFields.fillPlan(outer, island)
         return nil, string.format("mostly water, forest or buildings (%.0f%% of its points)", 100 * share)
     end
     local polygons = {}
+    local sign = OutlineFields.signedArea(island)
+    -- the player's own fences first: a closed fence inside the hole is the outline of an island, whatever the scan found there
+    local fenced = OutlineFields.fenceIslands(island, fenceLoops or OutlineFields.placedFenceLoops(), sign, outer)
+    for _, polygon in ipairs(fenced) do
+        if #polygons < OutlineFields.MAX_OBSTACLE_ISLANDS then
+            polygons[#polygons + 1] = polygon
+        end
+    end
     if share > OutlineFields.OBSTACLE_SHARE then
-        local sign = OutlineFields.signedArea(island)
         for _, cluster in ipairs(OutlineFields.clusterPoints(flagged, step)) do
             if #polygons >= OutlineFields.MAX_OBSTACLE_ISLANDS then
                 break
             end
-            local polygon = OutlineFields.clusterPolygon(cluster, step, island, sign)
+            local covered = false
+            for _, polygon in ipairs(fenced) do
+                covered = covered or OutlineFields.pointInPolygon(cluster[1][1], cluster[1][2], polygon)
+            end
+            local polygon = not covered and OutlineFields.clusterPolygon(cluster, step, island, sign) or nil
             if polygon ~= nil then
                 polygons[#polygons + 1] = polygon
             end
         end
     end
-    return { obstacles = polygons, share = share }
+    return { obstacles = polygons, share = share, fenced = #fenced }
 end
 
 function OutlineFields.shouldFill(outer, island)
@@ -464,7 +627,7 @@ function OutlineFields.dropOutlineHoles(field, success)
                 end
             end
         end
-        if plan == nil or (failed and plan.share > OutlineFields.OBSTACLE_SHARE) then
+        if plan == nil or (failed and (plan.share > OutlineFields.OBSTACLE_SHARE or (plan.fenced or 0) > 0)) then
             kept[#kept + 1] = boundary             -- (a hole whose lakes could not be carved out is left alone: better no lanes than lanes through a lake)
         else
             dropped[#dropped + 1] = boundary.boundaryLine
@@ -473,7 +636,7 @@ function OutlineFields.dropOutlineHoles(field, success)
             end
             say("outline field: an island of %.2f ha (%.0f%% of the field) is bare meadow inside the field (the inside of an outline, or what is left of it): the course covers it%s",
                 OutlineFields.polygonArea(boundary.boundaryLine) / 10000, 100 * OutlineFields.polygonArea(boundary.boundaryLine) / math.max(1, OutlineFields.polygonArea(outer)),
-                #carved > 0 and string.format("; %d lake / forest / building area(s) in it (%.0f%% of the hole) stay islands", #carved, 100 * plan.share) or "")
+                #carved > 0 and string.format("; %d island(s) in it stay islands (%d of them the outline of a placed fence, the rest lake / forest / building areas found by the scan, %.0f%% of the hole)", #carved, plan.fenced or 0, 100 * plan.share) or "")
         end
     end
     if #dropped == 0 and #verdicts > 0 then

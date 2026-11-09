@@ -385,5 +385,39 @@ check("... and it takes effect on the next course", #finished[#finished].islands
 check("... on again", (function() O.consoleToggle(nil, "on"); return O.ENABLED == true end)())
 check("... no argument toggles", (function() O.consoleToggle(nil); local off = O.ENABLED == false; O.consoleToggle(nil); return off and O.ENABLED == true end)())
 
+-- ===== fences: the player's outline of a keep-out =====
+CollisionFlag = { BUILDING = 1, STATIC_OBJECT = 2, WATER = 4, getHasGroupFlagSet = function(node, flag) return node == flag end }
+bit32 = { bor = function(a, b) return a + b end }
+raycastClosest = savedRay
+local function sq(x0, z0, x1, z1) return { { x1 = x0, z1 = z0, x2 = x1, z2 = z0 }, { x1 = x1, z1 = z0, x2 = x1, z2 = z1 }, { x1 = x1, z1 = z1, x2 = x0, z2 = z1 }, { x1 = x0, z1 = z1, x2 = x0, z2 = z0 } } end
+check("four fence segments that close are one loop of four corners", (function() local l = O.fenceLoops(sq(0, 0, 10, 10)); return #l == 1 and #l[1] == 4 end)())
+check("ends that are 0.5 m apart are still one corner, 3 m apart are not", #O.fenceLoops({ { x1 = 0, z1 = 0, x2 = 10, z2 = 0 }, { x1 = 10.5, z1 = 0, x2 = 10, z2 = 10 }, { x1 = 10, z1 = 10, x2 = 0, z2 = 10 }, { x1 = 0, z1 = 10, x2 = 0.3, z2 = 0 } }) == 1
+    and #O.fenceLoops({ { x1 = 0, z1 = 0, x2 = 10, z2 = 0 }, { x1 = 13, z1 = 0, x2 = 10, z2 = 10 }, { x1 = 10, z1 = 10, x2 = 0, z2 = 10 }, { x1 = 0, z1 = 10, x2 = 0, z2 = 0 } }) == 0)
+check("an open fence, a triangle with a spur (a fork) and a lone segment are no loops", (function()
+    local open = sq(0, 0, 10, 10); table.remove(open)
+    local fork = sq(0, 0, 10, 10); fork[#fork + 1] = { x1 = 10, z1 = 10, x2 = 20, z2 = 20 }
+    return #O.fenceLoops(open) == 0 and #O.fenceLoops(fork) == 0 and #O.fenceLoops({ { x1 = 0, z1 = 0, x2 = 5, z2 = 5 } }) == 0
+end)())
+check("two separate closed fences are two loops", #O.fenceLoops((function() local a = sq(0, 0, 10, 10); for _, seg in ipairs(sq(50, 50, 60, 60)) do a[#a + 1] = seg end; return a end)()) == 2)
+local fenceHole = rect(0, 0, 100, 100)
+local fencedIslands = O.fenceIslands(fenceHole, O.fenceLoops(sq(40, 40, 50, 50)), O.signedArea(fenceHole))
+check("a closed fence inside the hole is an island, padded by the margin, wound like the hole", #fencedIslands == 1 and O.pointInPolygon(38.6, 45, fencedIslands[1]) and not O.pointInPolygon(38.2, 45, fencedIslands[1]) and O.pointInPolygon(51.4, 41, fencedIslands[1]) and not O.pointInPolygon(30, 45, fencedIslands[1]) and (O.signedArea(fencedIslands[1]) >= 0) == (O.signedArea(fenceHole) >= 0))
+check("a fence outside the hole, one outside the field and one bigger than the hole are not its islands", #O.fenceIslands(fenceHole, O.fenceLoops(sq(190, 190, 195, 195)), 1) == 0 and #O.fenceIslands(fenceHole, O.fenceLoops(sq(40, 40, 50, 50)), 1, rect(0, 0, 45, 45)) == 0 and #O.fenceIslands(rect(0, 0, 100, 100), O.fenceLoops(sq(-5, -5, 105, 105)), 1, rect(0, 0, 100, 100)) == 0 and #O.fenceIslands(rect(30, 30, 40, 40), O.fenceLoops(sq(0, 0, 100, 100)), 1, rect(0, 0, 100, 100)) == 0)
+check("a fence round the whole inside of an outline (its corners a little outside the hole's own line) is one island that covers the hole", (function()
+    local hole = rect(10, 10, 90, 90)
+    local fence = O.fenceIslands(hole, O.fenceLoops(sq(8, 8, 92, 92)), O.signedArea(hole), rect(0, 0, 100, 100))
+    return #fence == 1 and O.pointInPolygon(50, 50, fence[1]) and O.pointInPolygon(12, 12, fence[1])
+end)())
+objects = {}
+put(40, 40, 50, 50, CollisionFlag.STATIC_OBJECT, 20.0)             -- a pylon: the grid finds it with one point or none
+local fencePlan = O.fillPlan(fieldOuter, rightHalf, O.fenceLoops(sq(150, 40, 160, 50)))
+check("a fenced keep-out in the hole: the plan carves the fence as an island (fenced = 1), and the hole is filled", fencePlan ~= nil and fencePlan.fenced == 1 and #fencePlan.obstacles >= 1 and O.pointInPolygon(155, 45, fencePlan.obstacles[1]))
+objects = {}
+put(150, 40, 160, 50, CollisionFlag.STATIC_OBJECT, 20.0); put(140, 30, 190, 70, CollisionFlag.WATER, 1.0)
+local mixed = O.fillPlan(fieldOuter, rightHalf, O.fenceLoops(sq(150, 40, 160, 50)))
+check("a thing the scan finds inside a fence is not carved twice (the fence is its outline); the pond round it still is", mixed ~= nil and mixed.fenced == 1)
+objects = {}
+check("no fences: the plan is the scan's alone, as before", (function() local plan = O.fillPlan(fieldOuter, rightHalf, {}); return plan ~= nil and plan.fenced == 0 and #plan.obstacles == 0 end)())
+
 print(string.format("outline_fields_test: %d/%d passed", passed, passed + failed))
 os.exit(failed == 0 and 0 or 1)

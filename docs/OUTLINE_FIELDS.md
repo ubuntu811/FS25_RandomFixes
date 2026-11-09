@@ -89,3 +89,14 @@ behaviour (such an inside is then worked by hand); `SMALL_HOLE_AREA`, `OBSTACLE_
   * whether `FieldCropsQuery:addRequiredGroundValue(0, 0, ...)` accepts value 0 as "no field" (the code path is the same as for the other ground types);
   * whether the helper's own `createFields` permission check passes for the AI worker's farm in multiplayer (it is the same check the plow makes: `getHasPlayerPermission("createFields", ownerConnection)`);
   * a helper started on the unplowed inside finds no field at all (detection starts from the vehicle's position): start it on the ring.
+
+## Fences are islands (2026-11-09)
+
+The scan (a ray from above every 8 m) cannot find thin things: a pylon is four footings and a lattice, stones lie low, so a hole with pylons in it was filled as plain meadow and the lanes went through them.
+The player can now say where the keep-out is: **place a fence round it**. When the hole is filled, the fences in `g_currentMission.placeableSystem` (placeables with `getFence`, not a vineyard's or an
+orchard's rows) are read (`OutlineFields.placedFenceLoops`): their segments' ends within 1 m are one corner, and a chain of segments that closes on itself is a loop (`fenceLoops`; an open fence, a fork or a
+T is no outline). A loop is an island of the hole (`fenceIslands`) when its middle lies in the hole, it lies inside the field and it encloses no more than 1.3 times the hole's area (a fence round the whole
+field, or round something much bigger, is not a keep-out). It is padded by 1.5 m (`expandLoop`: every edge moves out, the corner follows) and made into an island with the game's own boundary class, like the
+carved lakes. A fence round the whole inside of an outline (pylons, stones and all) is therefore one island that covers the hole: the lanes stay on the plowed ring. What the scan finds inside a fence is
+not carved a second time; what it finds outside any fence is carved as before. Constants: `FENCE_TOLERANCE`, `FENCE_MARGIN`, `FENCE_MAX_RATIO`. If an island cannot be made, the hole is left as the game made it.
+Tests: `tests/outline_fields_test.lua` (fence section).
