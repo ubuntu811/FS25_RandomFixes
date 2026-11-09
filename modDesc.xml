@@ -46,6 +46,7 @@ Eine Sammlung kleiner Korrekturen und Verbesserungen am Basisspiel, die fuer ein
         <sourceFile filename="scripts/FieldsOverlay.lua" />
         <sourceFile filename="scripts/OutlineFields.lua" />
         <sourceFile filename="scripts/SoilRollerSnow.lua" />
+        <sourceFile filename="scripts/TurnRadiusDump.lua" />
     </extraSourceFiles>
 
     <l10n>

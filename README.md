@@ -59,6 +59,10 @@ headland offsets come from the implements that are kept.
 Needs the mod on every client in multiplayer (each client generates its course). `NarrowLanes.ENABLED = false` in `scripts/NarrowLanes.lua` switches it off.
 Test: `lua5.1 tests/narrow_lanes_test.lua`.
 
+### Where the AI's turn radius comes from (`rfTurnRadius`)
+
+Console command, to the log: sit in a tractor with its implements attached and run `rfTurnRadius`. It lists every vehicle in the chain (does the game count it as an AI implement, what does it declare: radius, rotation joint, wheels, and the tool radius the game works out for it) and the planner's final minimum turn radius, combined the way `FieldCourseSettings` does: max(tractor steering x 1.1, the root's own minimum, the worst tool radius, 2.5 m). It exists because the vehicle XMLs of DLC packs cannot be read offline. Test: `lua5.1 tests/turn_radius_dump_test.lua`.
+
 ### Soil roller clears snow
 
 The cultivator, disc harrow, direct sowing, mulcher and grass roller wipe the snow they work over (`DensityMapHeightUtil.clearArea` at the end of their work-area update). The soil roller's `FSDensityMapUtil.updateRollerArea` never does, so a roller (which cannot be lifted) drives through white ground. `scripts/SoilRollerSnow.lua` clears the rolled area the same way, only while there is snow on the map; it is deliberately not `SnowSystem:removeSnow`, which the wheels use and whose ruts come back. `SoilRollerSnow.ENABLED = false` switches it off. Test: `lua5.1 tests/soil_roller_snow_test.lua`. Not yet confirmed in game.
