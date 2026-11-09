@@ -603,6 +603,16 @@ end
 
 -- before the game turns the island list into field.islands: the bare holes go (the lakes, forest and yards inside them stay islands of their own). Returns the boundary lines of the
 -- islands that were dropped.
+-- "16 points, 0.22 ha, x 504..589 z -282..-223: x,z x,z ..." for the log (rounded to 0.1 m)
+function OutlineFields.describeRing(ring)
+    local minX, maxX, minZ, maxZ, parts = math.huge, -math.huge, math.huge, -math.huge, {}
+    for _, p in ipairs(ring) do
+        minX, maxX, minZ, maxZ = math.min(minX, p[1]), math.max(maxX, p[1]), math.min(minZ, p[2]), math.max(maxZ, p[2])
+        parts[#parts + 1] = string.format("%.1f,%.1f", p[1], p[2])
+    end
+    return string.format("%d points, %.2f ha, x %.0f..%.0f z %.0f..%.0f: %s", #ring, math.abs(OutlineFields.polygonArea(ring)) / 10000, minX, maxX, minZ, maxZ, table.concat(parts, " "))
+end
+
 function OutlineFields.dropOutlineHoles(field, success)
     local dropped = {}
     if success ~= true or field == nil or field.islandBoundaries == nil or field.fieldRootBoundary == nil or not OutlineFields.allowed() then
@@ -622,6 +632,7 @@ function OutlineFields.dropOutlineHoles(field, success)
                 local made = OutlineFields.makeIslandBoundary(field, polygon)
                 if made ~= nil then
                     carved[#carved + 1] = made
+                    say("outline field: island polygon in %s | the game's boundary out %s", OutlineFields.describeRing(polygon), OutlineFields.describeRing(made.boundaryLine))
                 else
                     failed = true
                 end
