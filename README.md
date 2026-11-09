@@ -59,6 +59,10 @@ headland offsets come from the implements that are kept.
 Needs the mod on every client in multiplayer (each client generates its course). `NarrowLanes.ENABLED = false` in `scripts/NarrowLanes.lua` switches it off.
 Test: `lua5.1 tests/narrow_lanes_test.lua`.
 
+### Soil roller clears snow
+
+The cultivator, disc harrow, direct sowing, mulcher and grass roller wipe the snow they work over (`DensityMapHeightUtil.clearArea` at the end of their work-area update). The soil roller's `FSDensityMapUtil.updateRollerArea` never does, so a roller (which cannot be lifted) drives through white ground. `scripts/SoilRollerSnow.lua` clears the rolled area the same way, only while there is snow on the map; it is deliberately not `SnowSystem:removeSnow`, which the wheels use and whose ruts come back. `SoilRollerSnow.ENABLED = false` switches it off. Test: `lua5.1 tests/soil_roller_snow_test.lua`. Not yet confirmed in game.
+
 ## Quitting a savegame with an inline bale
 
 Leaving a savegame that contains an inline bale (a string of bales) could fail with `invalid key to 'next'` in `NetworkNode:delete` and hang until the game was force-closed,

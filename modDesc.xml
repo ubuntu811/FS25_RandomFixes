@@ -45,6 +45,7 @@ Eine Sammlung kleiner Korrekturen und Verbesserungen am Basisspiel, die fuer ein
         <sourceFile filename="scripts/PreparerCrops.lua" />
         <sourceFile filename="scripts/FieldsOverlay.lua" />
         <sourceFile filename="scripts/OutlineFields.lua" />
+        <sourceFile filename="scripts/SoilRollerSnow.lua" />
     </extraSourceFiles>
 
     <l10n>
