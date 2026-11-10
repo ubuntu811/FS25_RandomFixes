@@ -159,6 +159,14 @@ broken:updateView()
 check("a failed frame is left alone (no column added to its items)", broken.vehicles[1].columns[V.COLUMN] == nil)
 check("a vehicle that is nil: the unknown text", V.typeOf(nil) == "-")
 
+-- the first time the frame opens, the column is set up AFTER the game filled the first rows: the list is filled once more (and only then)
+frame.rfTypeColumn = nil
+frame.vehiclesList = { reloads = 0, reloadData = function(l) l.reloads = l.reloads + 1 end }
+frame:onFrameOpen()
+check("set up late (at the first open): the list is refilled once so the first rows get the type too", frame.rfTypeColumn == "done" and frame.vehiclesList.reloads == 1)
+frame:onFrameOpen()
+check("... and not again on the next opens", frame.vehiclesList.reloads == 1)
+
 print = realPrint
 realPrint(string.format("vehicle_type_column_test: %d/%d passed", passed, passed + failed))
 os.exit(failed == 0 and 0 or 1)

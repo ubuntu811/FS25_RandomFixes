@@ -131,7 +131,17 @@ if InGameMenuStatisticsFrame ~= nil and not VehicleTypeColumn.hooked then
         VehicleTypeColumn.setup(self)
     end)
     InGameMenuStatisticsFrame.onFrameOpen = Utils.appendedFunction(InGameMenuStatisticsFrame.onFrameOpen, function(self)
+        local wasDone = self.rfTypeColumn == "done"
         VehicleTypeColumn.setup(self)
+        -- the very first time the frame opens, the header is only found here, AFTER the game filled the first rows with plates: those rows were never given the type (the log's first
+        -- row is 13: the ones scrolled into view later). The list is filled once more, now that the column is in place.
+        if not wasDone and self.rfTypeColumn == "done" and self.vehiclesList ~= nil and self.vehiclesList.reloadData ~= nil then
+            VehicleTypeColumn.ensureColumns(self)
+            local ok, err = pcall(self.vehiclesList.reloadData, self.vehiclesList)
+            if not ok then
+                say("type column: the list could not be refilled (%s)", tostring(err))
+            end
+        end
     end)
     InGameMenuStatisticsFrame.updateView = Utils.prependedFunction(InGameMenuStatisticsFrame.updateView, function(self)
         if self.rfTypeColumn ~= "failed" then
