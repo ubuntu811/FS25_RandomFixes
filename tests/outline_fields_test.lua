@@ -429,5 +429,40 @@ check("rfFenceMargin shows and sets the padding (0..20 m)", (function()
     O.FENCE_MARGIN = before
     return ok
 end)())
+-- an island that a fence sticks out of grows to the hull of both; one the fence is inside of is left as it is
+do
+    local function segDist(px, pz, a, b)
+        local dx, dz = b[1] - a[1], b[2] - a[2]
+        local t = math.max(0, math.min(1, ((px - a[1]) * dx + (pz - a[2]) * dz) / (dx * dx + dz * dz)))
+        return math.sqrt((px - a[1] - t * dx) ^ 2 + (pz - a[2] - t * dz) ^ 2)
+    end
+    local outer = { { -50, -50 }, { 150, -50 }, { 150, 150 }, { -50, 150 } }
+    local fence = { { 10, 10 }, { 60, 10 }, { 60, 40 }, { 10, 40 } }                         -- the player's fence
+    local fenceSegs = {}
+    for i = 1, #fence do local a, b = fence[i], fence[i % #fence + 1]; fenceSegs[#fenceSegs + 1] = { x1 = a[1], z1 = a[2], x2 = b[1], z2 = b[2] } end
+    local loops = O.fenceLoops(fenceSegs)
+    -- the grass edge cuts the fence's lower right corner (the fence sticks out there)
+    local grass = { { 6, 6 }, { 50, 6 }, { 66, 22 }, { 62, 44 }, { 6, 44 } }
+    local pokes = { { 10, 10 }, { 60, 10 }, { 60, 40 }, { 10, 40 } }
+    local island = { { 3, 3 }, { 57, 3 }, { 57, 12 }, { 63, 46 }, { 3, 46 } }                -- (the fence corner (60, 10) is outside this line)
+    local hull = O.extendedIsland(island, loops, O.signedArea(island), outer)
+    check("a fence corner outside the island's line: the island becomes a hull that takes the padded fence in", hull ~= nil and #hull >= 4)
+    local worst = math.huge
+    for _, v in ipairs(fence) do
+        for i = 1, #hull do worst = math.min(worst, segDist(v[1], v[2], hull[i], hull[i % #hull + 1])) end
+    end
+    check("every fence corner is at least the margin inside the new island's line (" .. string.format("%.2f", worst) .. " m)", worst >= O.FENCE_MARGIN - 1e-6)
+    check("the new island has the island's winding", (O.signedArea(hull) >= 0) == (O.signedArea(island) >= 0))
+    local roomy = { { -10, -10 }, { 80, -10 }, { 80, 60 }, { -10, 60 } }
+    check("a fence well inside the island: nothing changes (nil)", O.extendedIsland(roomy, loops, O.signedArea(roomy), outer) == nil)
+    check("no fences: nothing changes (nil)", O.extendedIsland(island, {}, O.signedArea(island), outer) == nil)
+    check("rfFenceIslands toggles the feature", (function()
+        local c = registered["rfFenceIslands"]
+        local on = c.target[c.method](c.target, "off"):find("off") ~= nil
+        local back = c.target[c.method](c.target, "on"):find("on") ~= nil
+        return on and back and O.FENCE_EXTEND == true
+    end)())
+end
+
 print(string.format("outline_fields_test: %d/%d passed", passed, passed + failed))
 os.exit(failed == 0 and 0 or 1)

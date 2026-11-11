@@ -476,6 +476,39 @@ function OutlineFields.placedFenceLoops()
 end
 
 -- What to do with a hole: nil = leave it as the game made it; { obstacles = { polygon ... }, share } = fill it, and keep these islands inside it.
+-- The island as the game made it (the edge of the grass) plus the placed fences inside it, each with its margin: when a padded fence reaches beyond the island's own line (a fence corner that sticks out of the
+-- grass: the lanes and the boom then go through it), the island becomes the convex hull of both. nil when no fence reaches beyond it. Pure given loops.
+function OutlineFields.extendedIsland(island, loops, sign, outer)
+    local padded = OutlineFields.fenceIslands(island, loops, sign, outer)
+    local points, reaches = {}, false
+    for _, v in ipairs(island) do
+        points[#points + 1] = { v[1], v[2] }
+    end
+    for _, polygon in ipairs(padded) do
+        for _, v in ipairs(polygon) do
+            points[#points + 1] = { v[1], v[2] }
+            if not OutlineFields.pointInPolygon(v[1], v[2], island) then
+                reaches = true
+            end
+        end
+    end
+    if not reaches then
+        return nil
+    end
+    local hull = OutlineFields.convexHull(points)
+    if #hull < 3 then
+        return nil
+    end
+    if (OutlineFields.signedArea(hull) >= 0) ~= (sign >= 0) then
+        local reversed = {}
+        for i = #hull, 1, -1 do
+            reversed[#reversed + 1] = hull[i]
+        end
+        hull = reversed
+    end
+    return hull
+end
+
 function OutlineFields.fillPlan(outer, island, fenceLoops)
     if island == nil or #island < 3 then
         return nil, "no boundary"
@@ -663,6 +696,36 @@ function OutlineFields.dropOutlineHoles(field, success)
     return dropped
 end
 
+-- Every island of a field the game detected keeps the player's fences inside it out of the lanes: where a fence sticks out of the island's own line, the island grows to take it in (OutlineFields.extendedIsland).
+-- Not tied to the plowed-outline mode: a fence is the player's keep-out wherever it stands. rfFenceIslands off switches it.
+OutlineFields.FENCE_EXTEND = true
+function OutlineFields.extendIslandsByFences(field, success)
+    if not OutlineFields.FENCE_EXTEND or success ~= true or field == nil or field.islandBoundaries == nil or #field.islandBoundaries == 0 or field.fieldRootBoundary == nil then
+        return 0
+    end
+    local loops = OutlineFields.placedFenceLoops()
+    if #loops == 0 then
+        return 0
+    end
+    local outer, count = field.fieldRootBoundary.boundaryLine, 0
+    for i, boundary in ipairs(field.islandBoundaries) do
+        local island = boundary.boundaryLine
+        local hull = island ~= nil and #island >= 3 and OutlineFields.extendedIsland(island, loops, OutlineFields.signedArea(island), outer) or nil
+        local made = hull ~= nil and OutlineFields.makeIslandBoundary(field, hull) or nil
+        if made ~= nil then
+            say("outline field: an island of %.2f ha has a fence reaching beyond it: it grows to %.2f ha to keep the lanes and the implement off the fence (%s)", OutlineFields.polygonArea(island) / 10000, OutlineFields.polygonArea(made.boundaryLine) / 10000, OutlineFields.describeRing(made.boundaryLine))
+            field.islandBoundaries[i] = made
+            count = count + 1
+        end
+    end
+    return count
+end
+
+function OutlineFields.consoleFenceIslands(_, argument)
+    if argument == "on" then OutlineFields.FENCE_EXTEND = true elseif argument == "off" then OutlineFields.FENCE_EXTEND = false else OutlineFields.FENCE_EXTEND = not OutlineFields.FENCE_EXTEND end
+    return "islands grow to take in a fence that reaches beyond them: " .. (OutlineFields.FENCE_EXTEND and "on" or "off")
+end
+
 -- finishTask: drops the holes, and decides whether a detection that was started from INSIDE an outline stands: only when the start point really is inside a dropped hole
 function OutlineFields.finish(field, success)
     if success ~= true and field ~= nil and OutlineFields.ENABLED then
@@ -671,6 +734,10 @@ function OutlineFields.finish(field, success)
         say("outline field: the game found no field at %.0f %.0f%s (the start is %s)", sx, sz, field.rfInsideStart ~= nil and " (started from the grass inside, looked for field ground nearby)" or "", onField and "field ground: the game's own detection failed here" or "NOT field ground and none was found within " .. OutlineFields.SEARCH_MAX .. " m")
     end
     local dropped = OutlineFields.dropOutlineHoles(field, success)
+    local okExtend, errExtend = pcall(OutlineFields.extendIslandsByFences, field, success)
+    if not okExtend then
+        say("outline field: the fences were not taken into the islands (%s)", tostring(errExtend))
+    end
     if success == true and field ~= nil and field.rfInsideStart ~= nil then
         local start = field.rfInsideStart
         for _, line in ipairs(dropped) do
@@ -865,6 +932,7 @@ end
 
 if addConsoleCommand ~= nil then
     addConsoleCommand("rfFenceMargin", "How far a placed fence's AI island is padded, in metres (default 2; no argument shows it)", "consoleFenceMargin", OutlineFields)
+    addConsoleCommand("rfFenceIslands", "Islands grow to take in a placed fence that reaches beyond them (on | off, or no argument to toggle)", "consoleFenceIslands", OutlineFields)
     addConsoleCommand("rfOutlineFields", "Switch the AI worker filling the inside of a plowed outline on / off (on | off, or no argument to toggle)", "consoleToggle", OutlineFields)
 end
 
