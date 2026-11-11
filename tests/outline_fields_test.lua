@@ -419,5 +419,15 @@ check("a thing the scan finds inside a fence is not carved twice (the fence is i
 objects = {}
 check("no fences: the plan is the scan's alone, as before", (function() local plan = O.fillPlan(fieldOuter, rightHalf, {}); return plan ~= nil and plan.fenced == 0 and #plan.obstacles == 0 end)())
 
+check("rfFenceMargin shows and sets the padding (0..20 m)", (function()
+    local c = registered["rfFenceMargin"]
+    local before = O.FENCE_MARGIN
+    local shown = c.target[c.method](c.target)
+    local set = c.target[c.method](c.target, "5")
+    local capped = c.target[c.method](c.target, "99")
+    local ok = shown:find("2.0 m") ~= nil and set:find("5.0 m") ~= nil and capped:find("20.0 m") ~= nil
+    O.FENCE_MARGIN = before
+    return ok
+end)())
 print(string.format("outline_fields_test: %d/%d passed", passed, passed + failed))
 os.exit(failed == 0 and 0 or 1)

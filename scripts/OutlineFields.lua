@@ -854,7 +854,17 @@ if FieldCourseSegmentGenerator ~= nil and FieldCourseSegmentGenerator.finish ~= 
     end)
 end
 
+-- rfFenceMargin [metres]: how far a placed fence's island is padded (the default 2 m is the fence plus an implement's width of nothing: a wide boom swings further in a turn round the island's tip)
+function OutlineFields.consoleFenceMargin(_, value)
+    local m = tonumber(value)
+    if m ~= nil then
+        OutlineFields.FENCE_MARGIN = math.max(0, math.min(20, m))
+    end
+    return string.format("fence islands are padded %.1f m (the next course generation uses it)", OutlineFields.FENCE_MARGIN)
+end
+
 if addConsoleCommand ~= nil then
+    addConsoleCommand("rfFenceMargin", "How far a placed fence's AI island is padded, in metres (default 2; no argument shows it)", "consoleFenceMargin", OutlineFields)
     addConsoleCommand("rfOutlineFields", "Switch the AI worker filling the inside of a plowed outline on / off (on | off, or no argument to toggle)", "consoleToggle", OutlineFields)
 end
 
